@@ -1,17 +1,17 @@
 #Requires AutoHotkey v2.0
 
-class ChainedMap {
+class MapChain {
     static Base(*) {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
     }
 
     static Extend_static() {
-        A := ChainedMap.Base("foo", "bar")
-        B := ChainedMap.Extend(A, "foo", "baz")
+        A := MapChain.Base("foo", "bar")
+        B := MapChain.Extend(A, "foo", "baz")
     }
 
     static Clear() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend()
         B.Clear()
 
@@ -19,7 +19,7 @@ class ChainedMap {
     }
 
     static ClearOwn() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend("foo", "baz", "hello", "world")
         B.ClearOwn()
         B.Get("foo").AssertEquals("bar")
@@ -27,7 +27,7 @@ class ChainedMap {
     }
 
     static Clone() {
-        A := ChainedMap.Base("foo", "baz")
+        A := MapChain.Base("foo", "baz")
         B := A.Extend("baz", "qux")
 
         Cloned := B.Clone()
@@ -39,7 +39,7 @@ class ChainedMap {
     }
 
     static CloneOwn() {
-        A := ChainedMap.Base("foo", "baz")
+        A := MapChain.Base("foo", "baz")
         B := A.Extend("baz", "qux")
 
         Cloned := B.CloneOwn()
@@ -50,14 +50,14 @@ class ChainedMap {
     }
 
     static Delete() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend("foo", "baz")
         B.Delete("foo")
         B.Has("")
     }
 
     static DeleteOwn() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend("foo", "baz")
         B.DeleteOwn("foo")
 
@@ -65,7 +65,7 @@ class ChainedMap {
     }
 
     static DeleteAll() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend("foo", "baz")
 
         B.DeleteAll("foo")
@@ -75,14 +75,14 @@ class ChainedMap {
     }
 
     static Get() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend()
         
         B.Get("foo").AssertEquals("bar")
     }
 
     static GetAll() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend("foo", "baz")
         
         B.GetAll("foo").Join(", ").AssertEquals("baz, bar")
@@ -92,7 +92,7 @@ class ChainedMap {
         TestSuite.AssertThrows(GetOwn)
 
         GetOwn() {
-            A := ChainedMap.Base("foo", "bar")
+            A := MapChain.Base("foo", "bar")
             B := A.Extend()
 
             B.GetOwn("foo")
@@ -100,14 +100,14 @@ class ChainedMap {
     }
 
     static Has() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend()
 
         B.Has("foo").AssertEquals(true)
     }
 
     static HasOwn() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend()
 
         B.Has("foo").AssertEquals(true)
@@ -115,34 +115,34 @@ class ChainedMap {
     }
 
     static OwnCount() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend()
     
         (B.OwnCount).AssertEquals(0)
     }
 
     static Count() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend("baz", "qux", "foo", "baz") ; "foo" overridden
         (B.Count).AssertEquals(2)
     }
 
     static RawCount() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend("baz", "qux", "foo", "baz")
 
         (B.RawCount).AssertEquals(3)
     }
 
     static OwnValues() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend("baz", "qux", "foo", "baz")
 
         B.OwnValues.Stream().Join(", ").AssertEquals("baz, foo")
     }
 
     static Values() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend("baz", "qux", "foo", "baz")
 
         Count := 0
@@ -159,7 +159,7 @@ class ChainedMap {
     }
 
     static RawValues() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         B := A.Extend("baz", "qux", "foo", "baz")
 
         B.RawValues.Stream()
@@ -169,7 +169,7 @@ class ChainedMap {
     }
 
     static __Item() {
-        A := ChainedMap.Base("foo", "bar")
+        A := MapChain.Base("foo", "bar")
         A["foo"] := "baz"
         A["foo"].AssertEquals("baz")
 
@@ -180,7 +180,7 @@ class ChainedMap {
     }
 
     static Default_CaseSense() {
-        A := ChainedMap.Base()
+        A := MapChain.Base()
         B := A.Extend()
         C := B.Extend()
 
@@ -197,13 +197,13 @@ class ChainedMap {
     }
 
     static Extend(*) {
-        A := ChainedMap.Base()
+        A := MapChain.Base()
         B := A.Extend()
         B.Next.AssertEquals(A)
     }
 
     static Chain() {
-        A := ChainedMap.Base()
+        A := MapChain.Base()
         B := A.Extend()
         C := B.Extend()
 
@@ -216,21 +216,21 @@ class ChainedMap {
     }
 
     static Depth() {
-        A := ChainedMap.Base()
+        A := MapChain.Base()
         B := A.Extend()
         C := B.Extend()
         C.Depth.AssertEquals(3)
     }
 
     static Root() {
-        A := ChainedMap.Base()           
+        A := MapChain.Base()           
         B := A.Extend()
         C := B.Extend()
         C.Root.AssertEquals(A)
     }
 
     static Flatten() {
-        A := ChainedMap.Base("foo", "bar", "hello", "world")
+        A := MapChain.Base("foo", "bar", "hello", "world")
         B := A.Extend("baz", "qux", "foo", "baz")
         C := B.Flatten()
 
@@ -238,5 +238,31 @@ class ChainedMap {
 
         C.Count.AssertEquals(3)
         C.Get("foo").AssertEquals("baz")
+    }
+
+    static From(*) {
+        Orig := Map("foo", "bar")
+        A := MapChain.From(Orig,
+                           Map("foo", "baz", "hello", "world"))
+        
+        Orig["test"] := "123"
+        A.Has("test").AssertEquals(true)
+
+        A.Count.AssertEquals(3)
+        A.OwnCount.AssertEquals(2)
+        A.RawCount.AssertEquals(4)
+    }
+
+    static CloneFrom(*) {
+        Orig := Map("foo", "bar")
+        A := MapChain.CloneFrom(Orig,
+                           Map("foo", "baz", "hello", "world"))
+        
+        Orig["test"] := "123"
+        A.Has("test").AssertEquals(false)
+
+        A.Count.AssertEquals(2)
+        A.OwnCount.AssertEquals(1)
+        A.RawCount.AssertEquals(3)
     }
 }

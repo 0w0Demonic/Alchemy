@@ -3,7 +3,7 @@
 /**
  * A map with prototype-style inheritance.
  * 
- * Each `ChainedMap` can optionally link to a "parent" map. When a key lookup
+ * Each `MapChain` can optionally link to a "parent" map. When a key lookup
  * fails in the current map, it automatically falls back to its parent map,
  * continuing up the chain util the key is found.
  * 
@@ -12,31 +12,96 @@
  * - context-sensitive overrides
  * - tree-like structures for theme settings, localization, etc.
  * 
- * Maps are required to have the same values for their `Default` and `CaseSense`
- * properties, which are automatically set based on the parent map.
+ * @example
+ * ; create a map chain, and a second one which inherits from the first
+ * A := MapChain.Base("foo", "bar", "hello", "world")
+ * B := A.Extend("foo", "baz", "apple", "banana")
+ * 
+ * ; `B` defines its own entry behind "foo", but inherits its
+ * ; "hello" entry from its parent `A`.
+ * B["foo"]   ; "baz"
+ * B["hello"] ; "world"
+ * 
+ * @description
+ * Maps are required to have the same values for their `Default` and
+ * `CaseSense` properties, which are automatically set based on the
+ * parent map.
  * 
  * The parent from which the map inherits is referred to by the `.Next`
- * property. It is automatically assigned, when a new chained map is created,
+ * property. It is automatically assigned, when a new map chain is created,
  * and read-only.
+ * 
+ * The interface includes extra properties and methods to help distinguish
+ * between inherited and direct entries.
+ * 
+ * @example
+ * ; "Own" narrows the scope to just that particular map
+ * B.Has("hello")    ; true (inherited by `A`)
+ * B.HasOwn("hello") ; false
+ * 
+ * B.OwnCount ; 2 (keys defined only in `B`)
+ * B.Count    ; 3 ("top-level" keys of `A` and `B`)
+ * B.RawCount ; 4 (keys of `A` and `B`)
+ * 
+ * ; "All" goes all the way down the chain of maps
+ * B.GetAll("foo")    ; ["baz", "bar"]
+ * B.DeleteAll("foo") ; ["baz", "bar"]
+ * 
+ * @description
+ * Similarly, you'll be able to enumerate key-value pairs in multiple kinds
+ * of ways:
+ * 
+ * @example
+ * ; "foo" = "baz", "apple" = "banana"
+ * for K, V in B.OwnValues {
+ * }
+ * 
+ * ; "foo" = "baz", "apple" = "banana", "hello" = "world"
+ * for K, V in B {
+ * }
+ * 
+ * ; "foo" = "baz", "apple" = "banana", "foo" = "bar", "hello" = "world"
+ * for K, V in B.RawValues {
+ * }
+ * 
+ * @description
+ * Beyond that, there are a few new methods and properties:
+ * 
+ * @example
+ * ; returns an array of all maps in the inheritance chain
+ * B.Chain ; [B, A]
+ * 
+ * ; returns the top-most map in the chain
+ * B.Root ; [A]
+ * 
+ * ; the number of maps in the chain, including the current one
+ * B.Depth ; 2
+ * 
+ * ; produces a regular map out of all top-level keys
+ * Flattened := B.Flatten()
+ * 
+ * @author 0w0Demonic
  */
-class ChainedMap extends Map {
+class MapChain extends Map {
     /**
-     * Returns a new chained map with the given parent map to inherit from.
+     * Returns a new map chain with the given parent map to inherit from.
      * 
-     * You should generally use `ChainedMap.Base()`, `ChainedMap.Extend()`, or
+     * You should generally use `MapChain.Base()`, `MapChain.Extend()`, or
      * `.Extend()` instead.
      * 
      * @example
-     * A := ChainedMap(unset, "foo", "bar")
-     * B := ChainedMap(A)
+     * A := MapChain(unset, "foo", "bar")
+     * B := MapChain(A)
      * 
      * B["foo"] ; "bar"
      * 
      * @param   {Map?}  Next  base map to inherit from
      * @param   {Any*}  Args  key-value pairs to add
-     * @return  {ChainedMap}
+     * @return  {MapChain}
      */
     __New(Next?, Args*) {
+        static Define := (Object.Prototype.DefineProp)
+
         if (!IsSet(Next)) {
             super.__New(Args*)
             return
@@ -46,46 +111,140 @@ class ChainedMap extends Map {
         }
         this.CaseSense := Next.CaseSense
         if (ObjHasOwnProp(Next, "Default")) {
-            (Map.Prototype.Default.Set)(this, Next.Default)
+            Define(this, "Default", { Value: Next.Default })
         }
         super.__New(Args*)
-        (Object.Prototype.DefineProp)(this, "Next", { Get: (_) => Next })
+        Define(this, "Next", { Get: (_) => Next })
     }
 
     /**
-     * Returns a new chained map with no parent map to inherit from.
+     * Default of the `Next` property that refers to the parent map.
+     * 
+     * @return  {Map}
+     */
+    Next => false
+
+    /**
+     * Returns a new map chain with no parent map to inherit from.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("foo", "baz")
      * 
      * @param   {Any*}  Args  key-value pairs to add
-     * @return  {ChainedMap}
+     * @return  {MapChain}
      */
     static Base(Args*) {
-        return ChainedMap(unset, Args*)
+        return MapChain(unset, Args*)
     }
 
     /**
-     * Returns a new chained map that inherits from the given `BaseMap`.
+     * Returns a new map chain that inherits from the given `BaseMap`.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
-     * B := ChainedMap.Extend(A, "foo", "baz")
+     * A := MapChain.Base("foo", "bar")
+     * B := MapChain.Extend(A, "foo", "baz")
      * 
      * @param   {Map}   BaseMap  base map to inherit from
      * @param   {Any*}  Args     key-value pairs to add
-     * @return  {ChainedMap}
+     * @return  {MapChain}
      */
     static Extend(BaseMap, Args*) {
-        return ChainedMap(BaseMap, Args*)
+        return MapChain(BaseMap, Args*)
+    }
+
+    /**
+     * Returns a new map chain with the specified maps to connect. Updates
+     * inside of the affected maps are visible in the map chain. The first map
+     * is the top-most map, followed by its parent, and so on.
+     * 
+     * @example
+     * Top := Map("foo", "bar")
+     * Bottom := Map("foo", "baz")
+     * 
+     * Chain := MapChain.From(Top, Bottom)
+     * Chain["foo"] ; "bar" (`Top` comes first)
+     * 
+     * Top["foo"] := "qux"
+     * Chain["foo"] ; "qux"
+     * 
+     * @param   {Map*}  Maps  the maps to connect with
+     * @return  {MapChain}
+     */
+    static From(Maps*) {
+        if (!Maps.Length) {
+            throw ValueError("No maps specified")
+        }
+        for M in Maps {
+            if (!(M is Map)) {
+                throw TypeError("Expected a Map",, Type(M))
+            }
+        }
+        Enumer := Maps.__Enum(1)
+        Enumer(&Base)
+        ObjSetBase(Base, MapChain.Prototype)
+
+        MapObj := Base
+        while (Enumer(&Next)) {
+            ObjSetBase(Next, MapChain.Prototype)
+            (Object.Prototype.DefineProp)(MapObj, "Next", CreateGetter(Next))
+            MapObj := Next
+        }
+        return Base
+
+        static CreateGetter(Value) => { Get: (_) => Value }
+    }
+
+    /**
+     * Returns a new map chain by cloning the specified maps into a
+     * snapshot. Updates to the original maps are **not** visible in
+     * the resulting chain. The first map is the top-most map,
+     * followed by its parent, and so on.
+     * 
+     * @example
+     * Top := Map("foo", "bar")
+     * Bottom := Map("foo", "baz")
+     * 
+     * Chain := MapChain.From(Top, Bottom)
+     * Chain["foo"] ; "bar" (`Top` comes first)
+     * 
+     * Top["foo"] := "qux"
+     * Chain["foo"] ; "bar"
+     * 
+     * @param   {Map*}  Maps  the maps to connect with
+     * @return  {MapChain}
+     */
+    static CloneFrom(Maps*) {
+        if (!Maps.Length) {
+            throw ValueError("No maps specified")
+        }
+        for M in Maps {
+            if (!(M is Map)) {
+                throw TypeError("Expected a Map",, Type(M))
+            }
+        }
+        Enumer := Maps.__Enum(1)
+        Enumer(&Base)
+        Base := (Map.Prototype.Clone)(Base)
+        ObjSetBase(Base, MapChain.Prototype)
+
+        MapObj := Base
+        while (Enumer(&Next)) {
+            Next := (Map.Prototype.Clone)(Next)
+            ObjSetBase(Next, MapChain.Prototype)
+            (Object.Prototype.DefineProp)(MapObj, "Next", CreateGetter(Next))
+            MapObj := Next
+        }
+        return Base
+
+        static CreateGetter(Value) => { Get: (_) => Value }
     }
 
     /**
      * Clears all key-value pairs from the current, and all of its parent maps.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend()
      * B.Clear()
      * B.Has("foo") ; false
@@ -94,7 +253,7 @@ class ChainedMap extends Map {
         MapObj := this
         Loop {
             (Map.Prototype.Clear)(MapObj)
-            if (!ObjHasOwnProp(MapObj, "Next")) {
+            if (!MapObj.Next) {
                 return
             }
             MapObj := MapObj.Next
@@ -106,7 +265,7 @@ class ChainedMap extends Map {
      * maps.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("foo", "baz", "hello", "world")
      * B.ClearOwn()
      * B["foo"]       ; "bar"
@@ -120,7 +279,7 @@ class ChainedMap extends Map {
      * Performs a deep clone of the current map down its chain of parents.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("baz", "qux")
      * 
      * Cloned := B.Clone()
@@ -130,7 +289,7 @@ class ChainedMap extends Map {
         Result := (Map.Prototype.Clone)(this)
         MapObj := Result
         Loop {
-            if (!ObjHasOwnProp(MapObj, "Next")) {
+            if (!MapObj.Next) {
                 break
             }
             Cloned := (Map.Prototype.Clone)(MapObj.Next)
@@ -146,7 +305,7 @@ class ChainedMap extends Map {
      * Performs a shallow clone of the current map.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("baz", "qux")
      * 
      * Cloned := B.Clone()
@@ -161,7 +320,7 @@ class ChainedMap extends Map {
      * maps if absent. Only the first found key-value pair is deleted.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("baz", "qux")
      * 
      * B.Delete("foo")
@@ -176,7 +335,7 @@ class ChainedMap extends Map {
             if ((Map.Prototype.Has)(this, Key)) {
                 break
             }
-            if (!ObjHasOwnProp(this, "Next")) {
+            if (!MapObj.Next) {
                 throw UnsetItemError("Key not found")
             }
             MapObj := MapObj.Next
@@ -189,7 +348,7 @@ class ChainedMap extends Map {
      * to parent maps.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("foo", "baz")
      * B.DeleteOwn("foo")
      * B["foo"] ; "bar"
@@ -206,7 +365,7 @@ class ChainedMap extends Map {
      * An array of all deleted values is returned.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("foo", "baz")
      * 
      * Result := B.DeleteAll("foo") ; ["baz", "bar"]
@@ -226,7 +385,7 @@ class ChainedMap extends Map {
                 Value := (Map.Prototype.Delete)(MapObj, Key)
                 Result.Push(Value)
             }
-            if (!ObjHasOwnProp(MapObj, "Next")) {
+            if (!MapObj.Next) {
                 return
             }
             MapObj := MapObj.Next
@@ -235,11 +394,11 @@ class ChainedMap extends Map {
     }
 
     /**
-     * Returns a value from the chained map, falling back to parent maps if
+     * Returns a value from the map chain, falling back to parent maps if
      * needed.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend()
      * 
      * B.Get("foo") ; "bar"
@@ -254,7 +413,7 @@ class ChainedMap extends Map {
             if ((Map.Prototype.Has)(MapObj, Key)) {
                 return (Map.Prototype.Get)(MapObj, Key)
             }
-            if (!ObjHasOwnProp(MapObj, "Next")) {
+            if (!MapObj.Next) {
                 if (IsSet(Default)) {
                     return Default
                 }
@@ -265,11 +424,11 @@ class ChainedMap extends Map {
     }
 
     /**
-     * Returns a value from the chained map, without falling back to parent
+     * Returns a value from the map chain, without falling back to parent
      * maps.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend()
      * 
      * B.GetOwn("foo") ; Error!
@@ -287,7 +446,7 @@ class ChainedMap extends Map {
      * can be found, this method returns an empty array.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("foo", "baz")
      * 
      * B.GetAll("foo") ; ["baz", "bar"]
@@ -303,7 +462,7 @@ class ChainedMap extends Map {
             if ((Map.Prototype.Has)(MapObj, Key)) {
                 Result.Push((Map.Prototype.Get)(MapObj, Key))
             }
-            if (!ObjHasOwnProp(MapObj, "Next")) {
+            if (!MapObj.Next) {
                 break
             }
             MapObj := MapObj.Next
@@ -316,7 +475,7 @@ class ChainedMap extends Map {
      * back to parent maps when needed.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend()
      * 
      * B.Has("foo") ; true
@@ -330,7 +489,7 @@ class ChainedMap extends Map {
             if ((Map.Prototype.Has)(MapObj, Key)) {
                 return true
             }
-            if (!ObjHasOwnProp(MapObj, "Next")) {
+            if (!MapObj.Next) {
                 return false
             }
             MapObj := MapObj.Next
@@ -342,7 +501,7 @@ class ChainedMap extends Map {
      * without falling back to parent maps.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend()
      * 
      * B.Has("foo")    ; true
@@ -360,7 +519,7 @@ class ChainedMap extends Map {
      * counting key-value pairs from parent maps.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend()
      * 
      * B.OwnCount ; 0
@@ -381,7 +540,7 @@ class ChainedMap extends Map {
      * down the chain of parent maps.
      * 
      * @example
-     * A := ChainedMap(unset, "foo", "bar")
+     * A := MapChain(unset, "foo", "bar")
      * B := A.Extend("baz", "qux", "foo", "baz") ; "foo" overridden
      * 
      * B.Count    ; 2
@@ -398,7 +557,7 @@ class ChainedMap extends Map {
                 for Key, Value in (Map.Prototype.__Enum)(MapObj) {
                     Seen.Set(Key, Value)
                 }
-                if (!ObjHasOwnProp(MapObj, "Next")) {
+                if (!MapObj.Next) {
                     break
                 }
                 MapObj := MapObj.Next
@@ -412,7 +571,7 @@ class ChainedMap extends Map {
      * chain of parent maps.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("baz", "qux", "foo", "baz") ; "foo" overridden
      * 
      * B.RawCount ; 3
@@ -426,7 +585,7 @@ class ChainedMap extends Map {
             MapObj := this
             Loop {
                 Result += Count(MapObj)
-                if (!ObjHasOwnProp(MapObj, "Next")) {
+                if (!MapObj.Next) {
                     break
                 }
                 MapObj := MapObj.Next
@@ -440,7 +599,7 @@ class ChainedMap extends Map {
      * inheriting keys from parent maps.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("baz", "qux", "foo", "baz")
      * 
      * B.OwnValues ; <("baz", "qux"), ("foo", "baz")>
@@ -453,7 +612,7 @@ class ChainedMap extends Map {
      * Returns an enumerator for the map (see `.__Enum()`).
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar", "hello", "world")
+     * A := MapChain.Base("foo", "bar", "hello", "world")
      * B := A.Extend("baz", "qux", "foo", "baz")
      * 
      * B.Values ; <("baz", "qux"), ("foo", "baz"), ("hello", "world")>
@@ -468,7 +627,7 @@ class ChainedMap extends Map {
      * already in use.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar", "hello", "world")
+     * A := MapChain.Base("foo", "bar", "hello", "world")
      * B := A.Extend("baz", "qux", "foo", "baz")
      * 
      * for Key, Value in B.Values {
@@ -493,7 +652,7 @@ class ChainedMap extends Map {
                         return true
                     }
                 }
-                if (!ObjHasOwnProp(MapObj, "Next")) {
+                if (!MapObj.Next) {
                     return false
                 }
                 MapObj := MapObj.Next
@@ -503,11 +662,11 @@ class ChainedMap extends Map {
     }
 
     /**
-     * Returns an enumerator that iterates all key-value pairs from the current,
-     * and down the chain of parent maps.
+     * Returns an enumerator that iterates all key-value pairs from the
+     * current map and its consecutive parents.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("baz", "qux", "foo", "baz")
      * 
      * B.RawValues ; <("baz", "qux"), ("foo", "baz"), ("foo", "bar")>
@@ -523,7 +682,7 @@ class ChainedMap extends Map {
                     if (Items(&Key, &Value)) {
                         return true
                     }
-                    if (!ObjHasOwnProp(MapObj, "Next")) {
+                    if (!MapObj.Next) {
                         return false
                     }
                     MapObj := MapObj.Next
@@ -534,9 +693,16 @@ class ChainedMap extends Map {
     }
 
     /**
-     * Returns a value from the chained map.
+     * Returns a value from the map chain.
      * 
-     * @
+     * @example
+     * A := MapChain.Base("foo", "bar")
+     * B := A.Extend()
+     * 
+     * B["foo"] ; "bar"
+     * B["foo"] := "baz"
+     * 
+     * B.RawCount ; 2 ("foo" was only overridden in `B`, not replaced)
      * 
      * @param   {Any}  Key  the map key to retrieve value from
      * @return  {Any}
@@ -553,7 +719,7 @@ class ChainedMap extends Map {
                 if (Has(MapObj, Key)) {
                     return Get(MapObj, Key)
                 }
-                if (!ObjHasOwnProp(MapObj, "Next")) {
+                if (!MapObj.Next) {
                     return __Item(MapObj, Key)
                 }
                 MapObj := MapObj.Next
@@ -574,7 +740,7 @@ class ChainedMap extends Map {
 
             Loop {
                 Define(MapObj, "Default", { Value: value })
-                if (!ObjHasOwnProp(MapObj, "Next")) {
+                if (!MapObj.Next) {
                     return
                 }
                 MapObj := MapObj.Next
@@ -585,12 +751,6 @@ class ChainedMap extends Map {
     /**
      * Sets the case sensitivity setting of the map, including all of its
      * parents.
-     * 
-     * @example
-     * A := ChainedMap.Base("foo", "bar")
-     * B := A.Extend()
-     * 
-     * B.Get("foo") ; "bar"
      * 
      * @param   {Primitive}  value  the new setting
      */
@@ -603,7 +763,7 @@ class ChainedMap extends Map {
             
             Loop {
                 CaseSense(MapObj, value)
-                if (!ObjHasOwnProp(MapObj, "Next")) {
+                if (!MapObj.Next) {
                     return
                 }
                 MapObj := MapObj.Next
@@ -612,25 +772,25 @@ class ChainedMap extends Map {
     }
 
     /**
-     * Returns a new chained map that inherits from this map.
+     * Returns a new map chain that inherits from this map.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("foo", "baz")
      * 
      * B["foo"] ; "baz"
      * 
      * @param   {Any*}  Args  key-value pairs to add
-     * @return  {ChainedMap}
+     * @return  {MapChain}
      */
-    Extend(Args*) => ChainedMap(this, Args*)
+    Extend(Args*) => MapChain(this, Args*)
 
 
     /**
      * Returns the inheritance chain of maps, including the current map.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar")
+     * A := MapChain.Base("foo", "bar")
      * B := A.Extend("foo", "baz")
      * C := B.Extend("foo", "qux")
      * 
@@ -644,7 +804,7 @@ class ChainedMap extends Map {
             MapObj := this
             Loop {
                 Chain.Push(MapObj)
-                if (!ObjHasOwnProp(MapObj, "Next")) {
+                if (!MapObj.Next) {
                     return Chain
                 }
                 MapObj := MapObj.Next
@@ -654,11 +814,11 @@ class ChainedMap extends Map {
     }
 
     /**
-     * Returns the root of the chained map (the parent map that has no more
+     * Returns the root of the map chain (the parent map that has no more
      * parents to inherit from).
      * 
      * @example
-     * A := ChainedMap.Base()
+     * A := MapChain.Base()
      * B := A.Extend()
      * C := B.Extend()
      * C.Root ; A
@@ -669,7 +829,7 @@ class ChainedMap extends Map {
         get {
             MapObj := this
             Loop {
-                if (!ObjHasOwnProp(MapObj, "Next")) {
+                if (!MapObj.Next) {
                     return MapObj
                 }
                 MapObj := MapObj.Next
@@ -684,7 +844,7 @@ class ChainedMap extends Map {
      * by 1.
      * 
      * @example
-     * A := ChainedMap.Base()
+     * A := MapChain.Base()
      * B := A.Extend()
      * C := B.Extend()
      * C.Depth ; 3
@@ -696,7 +856,7 @@ class ChainedMap extends Map {
             Depth := 1
             MapObj := this
             Loop {
-                if (!ObjHasOwnProp(MapObj, "Next")) {
+                if (!MapObj.Next) {
                     return Depth
                 }
                 MapObj := MapObj.Next
@@ -713,9 +873,11 @@ class ChainedMap extends Map {
      * no connection to the original chain and will not reflect future changes.
      * 
      * @example
-     * A := ChainedMap.Base("foo", "bar", "hello", "world")
+     * A := MapChain.Base("foo", "bar", "hello", "world")
      * B := A.Extend("baz", "qux", "foo", "baz")
      * C := B.Flatten() ; Map("baz", "qux", "foo", "baz", "hello", "world")
+     * 
+     * @return  {Map}
      */
     Flatten() {
         Result := Map()

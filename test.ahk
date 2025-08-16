@@ -1,5 +1,5 @@
 #Requires AutoHotkey v2
-#Include "%A_LineFile%/../ChainedMap.ahk"
+#Include "%A_LineFile%/../MapChain.ahk"
 #Include <AquaHotkeyX> ; for assertions, because I'm being lazy
 #SingleInstance
 
@@ -68,5 +68,5 @@ class TestSuite {
         }
     }
 
-    #Include "%A_LineFile%/../tests/ChainedMap.ahk"
+    #Include "%A_LineFile%/../tests/MapChain.ahk"
 }
