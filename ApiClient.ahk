@@ -124,22 +124,15 @@ class ApiClient extends WinHttpRequest {
         static PrepareEndpoint(PropDesc) {
             switch {
                 case (ObjHasOwnProp(PropDesc, "Value")):
-                    return {
-                        Call: CreateFixedUrlEndpoint(PropDesc.Value)
-                    }
+                    return { Call: CreateFixedUrlEndpoint(PropDesc.Value) }
                 case (ObjHasOwnProp(PropDesc, "Get")):
-                    if (PropDesc.Get.MinParams > 0) {
-                        return {
-                            Get: CreateVariableUrlEndpoint(PropDesc.Get)
-                        }
-                    }
-                    return {
-                        Call: CreateNoArgGetter(PropDesc.Get)
-                    }
+                    return (PropDesc.Get.MinParams > 0)
+                        ? { Get: CreateVariableUrlEndpoint(PropDesc.Get) }
+                        : { Call: CreateNoArgGetter(PropDesc.Get) }
                 case (ObjHasOwnProp(PropDesc, "Call")):
-                    return {
-                        Call: CreateVariableUrlEndpoint(PropDesc.Call)
-                    }
+                    return (PropDesc.Call.MinParams > 0)
+                        ? { Call: CreateVariableUrlEndpoint(PropDesc.Call) }
+                        : { Call: CreateNoArgGetter(PropDesc.Call) }
                 default: throw ValueError("Invalid property")
             }
         }
