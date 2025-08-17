@@ -8,13 +8,13 @@
   .  `       `-    \, `"'\_    `
 ```
 
-This repository contains a variety of AHK v2 utilities that really bend OOP
+This repository contains a variety of AHK v2 utilities that really bring OOP
 down to its knees. You will find things like:
 
 - API client generators
 - self-generating enum classes
 - cascading objects and classes (like CSS selectors)
-- "chained maps" (note: these are *really* cool)
+- "map chains" (note: these are *really* cool)
 - object viewer tools
 - and a wide variety of other oddities
 
@@ -28,19 +28,19 @@ really cool patterns that are impossible in other languages.
 That aside, let this be your "magic spellbook" of utils, and have fun looking
 around.
 
-## Chained Maps
+## Map Chains
 
-Our first little exhibit of this repo is the `ChainedMap` type. It's a special
+Our first little exhibit of this repo is the `MapChain` type. It's a special
 type of map that can optionally be linked to a "parent" map. Whenever a key
 lookup fails, the map will continue its search in the parent map, and so on.
 
 If you need tree-like structures, or map entries that you can override in
 certain contexts, this might be the perfect thing for you.
 
-To create a new chained map, start by creating the "root map" like this:
+To create a new map chain, start by creating the "root map" like this:
 
 ```ahk
-A := ChainedMap.Base("foo", "bar", "hello", "world!")
+A := MapChain.Base("foo", "bar", "hello", "world!")
 ```
 
 Then, you can create a second map that builds on the previous one:
@@ -49,9 +49,12 @@ Then, you can create a second map that builds on the previous one:
 B := A.Extend("foo", "baz", "apple", "banana")
 
 ; alternatives:
-; B := ChainedMap.Extend(A, ...)
-; B := ChainedMap(A, ...)
+; B := MapChain.Extend(A, ...)
+; B := MapChain(A, ...)
 ```
+
+Another way to create a map chain is to use the `MapChain.From()` and
+`MapChain.CloneFrom()`
 
 You'll end up with a map that can inherit from its parent.
 
@@ -69,7 +72,7 @@ B["foo"] ; "baz"
 ```
 
 You can build surprisingly elaborate structures with this. The interface is
-modeled closely after AutoHotkey’s built-in `Map`, but `ChainedMap` includes
+modeled closely after AutoHotkey’s built-in `Map`, but `MapChain` includes
 extra properties and methods to help distinguish between inherited and direct
 entries. For instance, `Own[...]` narrows the scope to just that particular
 map. As an example:
@@ -78,7 +81,7 @@ map. As an example:
 B.HasOwn("foo") ; explicitly searches `B`, without falling back to its parent
 ```
 
-Beyond that, there are a few methods unique to chained maps:
+Beyond that, there are a few methods unique to map chains:
 
 - `.Chain()`: returns an array of all maps in the inheritance chain,
   starting from the current map and moving up.
