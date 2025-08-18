@@ -65,8 +65,9 @@ class WinHttpRequest {
 
 	request(url, method := 'GET', post_data?, headers := {}) {
 		this.Open(method, url)
-		for k, v in headers.OwnProps()
+		for k, v in headers.OwnProps() {
 			this.SetRequestHeader(k, v)
+		}
 		this.Send(post_data?)
 		return this.ResponseText
 	}

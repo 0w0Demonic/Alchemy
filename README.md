@@ -94,32 +94,30 @@ I think the rest will speak for itself when looking through the doc comments,
 and I'm hoping you can build something fun out of this; as much as I myself had
 fun putting this together.
 
----
-
 ## Cascades
 
-`Cascade`, originally meant for making context-based theme object, can
+`Cascade`, originally meant for making context-based theme objects, can
 be used to create objects that participate in a "cascading behavior".
 
-Objects inside this structure fall back to their sibling objects with the name
+Objects inside this structure fall back to their sibling objects with the same
 name, e.g.:
 
 ```ahk
 Theme := {
     Button: {
-        Font: { ; this object...
-            Name: "Cascadia Code" ; pun not intended - literally best font
+        Font: { ; <-- this object...
+            Name: "Cascadia Code"
         }
     },
-    Font: { ; inherits from this object!
+    Font: { ; <-- ...inherits from this object!
         Size: 12
     }
-    Opt: "..."
-}
+} ; <-- ...and then finally from the root.
+
 Cascade.Transform(Theme) ; alternatively: `Theme := Cascade.Create(Theme)`
 
 Font := Theme.Button.Font
-MsgBox(Font.Name) ; "Cascadia Code"
+MsgBox(Font.Name) ; "Cascadia Code" ; pun not intended, it's a good font fr.
 MsgBox(Font.Size) ; 12
 ```
 
@@ -151,8 +149,6 @@ Font := ButtonTheme.Font()
 MsgBox(ButtonTheme.Size) ; 12
 ```
 
----
-
 ## API Mapper
 
 This class builds a simple API client based on metadata. It allows you to
@@ -172,7 +168,7 @@ object describing how to make the request.
 
 This object **must** contain:
 
-- `Method` (HTTP verb like "GET", "POST", etc.)
+- `Verb` (HTTP verb like "GET", "POST", etc.)
 - `Path` (relative URL fragment, e.g. `"/users/12345"`)
 
 You'll be able to add more optional stuff later (I'm having
@@ -182,7 +178,7 @@ are required.
 ```ahk
 class JsonPlaceholder extends ApiClient {
     static Test => {
-        Method: "Get",
+        Verb: "Get",
         Path: "/todos/1"
     }
 }
@@ -195,45 +191,92 @@ Here, `Test` is just a static property describing a request `GET /todos/1`.
 When the `JsonPlaceholder` class loads, it turns those descriptions into
 *methods*.
 
-### Query Strings
-
-Query strings can be added by passing an object with key/value pairs like this:
-
-```ahk
-static GetUser[id, name] => {
-    Method: "Get",
-    Path: "/users",
-    Query: {
-        id: id,
-        name: name
-    }
-}
-
-; resolves to `.../users?id=734?name=foo`
-Api.GetUser[734, "foo"]()
-```
-
 ### Parameterized Endpoints
 
-Properties can be parameterized, to interpolate into the endpoint path:
+Properties can be parameterized, to interpolate into the endpoint path, or
+to set certain query strings and and headers:
 
 ```ahk
 class PokeApi extends ApiClient {
     ; static Pokemon(Ident) { ... } is fine, too.
     static Pokemon[Ident] => {
-        Method: "Get",
-        Path: "/pokemon/" . Ident
+        Verb: "Get",
+        Path: "/pokemon/" . Ident,
     }
 }
 ```
 
 This is extremely useful for whenever the path is not fixed, but depends on
-external parameters. Note that when you're using parameters like this, you need
-to "call twice" like this:
+external parameters.
 
 ```ahk
-Api := PokeApi()
+Api := PokeApi("https://pokeapi.co/api/v2")
 Api.Pokemon["pikachu"]() ; {"abilities":[{"ability": ... }]}
+```
+
+### Query Strings and Headers
+
+Query strings and headers can be added by an object with key/value pairs like
+this:
+
+```ahk
+class ExampleApi extends ApiClient {
+    static GetUser[id, name] => {
+        Verb: "Get",
+        Path: "/users",
+        Query: {
+            id: id,
+            name: name
+        },
+        Headers:
+    }
+}
+
+; resolves to `https://www.example.com/users?id=734?name=foo`
+Api := ExampleApi("https://www.example.com/api/v2")
+Api.GetUser[734, "foo"]()
+```
+
+Accepted values:
+
+- Maps
+- Arrays (elements of alternating key/value)
+- Objects
+
+To be able to pass keys that contains hyphens (which AHK doesn't allow as
+valid symbol), you'll need to use Maps instead of plain objects. For query
+and header keys that are used multiple times, you'll need to use arrays.
+
+```ahk
+; as map
+Query: Map("weird-key-name", "value")
+
+; as array
+Headers: ["Set-Cookie", "foo", "Set-Cookie", "bar"]
+```
+
+### Payload in POST/PUT
+
+Some HTTP methods accept a payload to be sent. This is determined by the
+`static Verbs` property of each `ApiClient` subclass.
+
+Whenever an endpoint is both variable (i.e., if it's parameterized) and accepts
+a payload, it must be "called twice":
+
+```ahk
+class ExampleApi extends ApiClient {
+    static UpdateUser[Id] => {
+        Path: "/Users/" . Id
+        Verb: "POST"
+    }
+}
+
+Client := ExampleApi("https://www.example.com")
+
+Client.UpdateUser[123]("{ id: 123, name: ... }")
+
+; alternatively, if `UpdateUser` was defined as method:
+Client.UpdateUser(123)("{ ... }")
 ```
 
 ### Roadmap
@@ -259,7 +302,7 @@ ApiResult := Schema( ... )
 
 class Example extends ApiClient {
     static RemoveUsers => {
-        Method: "Post",
+        Verb: "Post",
         Path: "/users/..."
         Parameters: ExpectedParams,
         ReturnType: ApiResult
