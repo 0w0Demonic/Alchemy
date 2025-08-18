@@ -74,7 +74,7 @@ B["foo"] ; "baz"
 You can build surprisingly elaborate structures with this. The interface is
 modeled closely after AutoHotkey’s built-in `Map`, but `MapChain` includes
 extra properties and methods to help distinguish between inherited and direct
-entries. For instance, `Own[...]` narrows the scope to just that particular
+entries. `Own[...]`, for example, narrows the scope to just that particular
 map. As an example:
 
 ```ahk
@@ -83,7 +83,7 @@ B.HasOwn("foo") ; explicitly searches `B`, without falling back to its parent
 
 Beyond that, there are a few methods unique to map chains:
 
-- `.Chain()`: returns an array of all maps in the inheritance chain,
+- `.Chain`: returns an array of all maps in the inheritance chain,
   starting from the current map and moving up.
 - `.Root`: gives back the top-most map in the chain.
 - `.Depth`: the number of maps in the chain, including the current one.
@@ -95,3 +95,177 @@ and I'm hoping you can build something fun out of this; as much as I myself had
 fun putting this together.
 
 ---
+
+## Cascades
+
+`Cascade`, originally meant for making context-based theme object, can
+be used to create objects that participate in a "cascading behavior".
+
+Objects inside this structure fall back to their sibling objects with the name
+name, e.g.:
+
+```ahk
+Theme := {
+    Button: {
+        Font: { ; this object...
+            Name: "Cascadia Code" ; pun not intended - literally best font
+        }
+    },
+    Font: { ; inherits from this object!
+        Size: 12
+    }
+    Opt: "..."
+}
+Cascade.Transform(Theme) ; alternatively: `Theme := Cascade.Create(Theme)`
+
+Font := Theme.Button.Font
+MsgBox(Font.Name) ; "Cascadia Code"
+MsgBox(Font.Size) ; 12
+```
+
+Create a new cascade by using `Cascade.Create(Obj)` or `Cascade.Transform(Obj)`:
+
+```ahk
+Theme := { ... }
+
+Obj := Cascade.Create(Theme) ; create a clone
+Cascade.Transform(Theme)     ; change in place
+```
+
+Use `ClassCascade`, when working with classes. Works exactly the same, except
+that using it as base will automatically `.Transform()` it for you.
+
+```ahk
+class Theme extends ClassCascade {
+    class Button {
+        class Font {
+            Name => "Cascadia Code"
+        }
+    }
+    class Font {
+        Size => 12
+    }
+}
+ButtonTheme := Theme.Button
+Font := ButtonTheme.Font()
+MsgBox(ButtonTheme.Size) ; 12
+```
+
+---
+
+## API Mapper
+
+This class builds a simple API client based on metadata. It allows you to
+describe REST-like APIs in a very convenient manner that is declarative and
+reusable.
+
+### Dependencies
+
+- `cJson.ahk` by G33kDude ([GitHub](https://github.com/G33kDude/cJson.ahk))
+- `WinHttpClient.ahk` by thqby ([GitHub](https://github.com/thqby/ahk2_lib/blob/master/WinHttpRequest.ahk))
+
+### How it Works
+
+To define an API client, you extend `ApiClient` and describe each endpoint using
+static properties. Each property corresponds to an API call and returns a small
+object describing how to make the request.
+
+This object **must** contain:
+
+- `Method` (HTTP verb like "GET", "POST", etc.)
+- `Path` (relative URL fragment, e.g. `"/users/12345"`)
+
+You'll be able to add more optional stuff later (I'm having
+[big plans](#roadmap) here...), but at minimum these two
+are required.
+
+```ahk
+class JsonPlaceholder extends ApiClient {
+    static Test => {
+        Method: "Get",
+        Path: "/todos/1"
+    }
+}
+
+Client := JsonPlaceHolder("https://jsonplaceholder.typicode.com")
+Client.Test() ; "{ "userId": 1, ... }"
+```
+
+Here, `Test` is just a static property describing a request `GET /todos/1`.
+When the `JsonPlaceholder` class loads, it turns those descriptions into
+*methods*.
+
+### Query Strings
+
+Query strings can be added by passing an object with key/value pairs like this:
+
+```ahk
+static GetUser[id, name] => {
+    Method: "Get",
+    Path: "/users",
+    Query: {
+        id: id,
+        name: name
+    }
+}
+
+; resolves to `.../users?id=734?name=foo`
+Api.GetUser[734, "foo"]()
+```
+
+### Parameterized Endpoints
+
+Properties can be parameterized, to interpolate into the endpoint path:
+
+```ahk
+class PokeApi extends ApiClient {
+    ; static Pokemon(Ident) { ... } is fine, too.
+    static Pokemon[Ident] => {
+        Method: "Get",
+        Path: "/pokemon/" . Ident
+    }
+}
+```
+
+This is extremely useful for whenever the path is not fixed, but depends on
+external parameters. Note that when you're using parameters like this, you need
+to "call twice" like this:
+
+```ahk
+Api := PokeApi()
+Api.Pokemon["pikachu"]() ; {"abilities":[{"ability": ... }]}
+```
+
+### Roadmap
+
+#### Validation and Data Binding
+
+An object that describes expected types and structure of the JSON. They should
+be able to validate both request and response body, and convert values into the
+correct representation. Here's roughly how it should look like:
+
+```ahk
+; channel ID, followed by an array of user objects
+ExpectedParams := Schema({
+    channel: Integer,
+    users: Array({
+        id: Mandatory(Integer),
+        name: Mandatory(String),
+        nickname: String
+    })
+})
+
+ApiResult := Schema( ... )
+
+class Example extends ApiClient {
+    static RemoveUsers => {
+        Method: "Post",
+        Path: "/users/..."
+        Parameters: ExpectedParams,
+        ReturnType: ApiResult
+    }
+}
+Client := Example("https://www.example.com/api/v2")
+; ...
+Client.RemoveUsers(...) ; ApiResult{ ... }
+```

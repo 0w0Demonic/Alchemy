@@ -26,13 +26,28 @@
  * 
  * An endpoint has to return an object with two mandatory fields
  * `.Method` (a HTTP method) and `.Path` (path relative to the base URL).
- * More are coming very soon.
- * 
+ *  
  * @example
  * static Pokemon[Ident] => {
  *     Method: "Get",
  *     Path: "/pokemon/" . Ident
  * }
+ * 
+ * @description
+ * Use the `Query` property to create a query string to be used in the request:
+ * 
+ * @example
+ * static GetUser[id, name] => {
+ *     Method: "Get",
+ *     Path: "/users",
+ *     Query: {
+ *         id: id,
+ *         name: name
+ *     }
+ * }
+ * 
+ * ; resolves to `.../users?id=734?name=foo`
+ * Api.GetUser[734, "foo"]()
  * 
  * @description
  * Each property can be parameterized (`Ident` in the previous example),
@@ -146,11 +161,37 @@ class ApiClient extends WinHttpRequest {
             }
 
             URL := Client.BaseUrl . Endpoint.Path
+            if (ObjHasOwnProp(Endpoint, "Query")) {
+                Query := Endpoint.Query
+                if (!IsObject(Query)) {
+                    throw TypeError("Expected an Object",, Type(Query))
+                }
+                for Key, Value in Query.OwnProps() {
+                    URL .= (A_Index == 1) ? "?" : "&"
+                    URL .= UrlEncode(Key) . "=" . UrlEncode(Value)
+                }
+            }
+
             if (IsSet(PostData) && !(PostData is String)) {
                 PostData := JSON.Dump(PostData)
             }
             Response := Client.Request(URL, Endpoint.Method)
             return JSON.Load(Response)
+        }
+
+        static UrlEncode(Str) {
+            Result := ""
+            Loop Parse Str {
+                switch {
+                    case (A_LoopField ~= "[A-Za-z0-9\-\.-~]"):
+                        Result .= A_LoopField
+                    case (A_LoopField == " "):
+                        Result .= "+"
+                    default:
+                        Result .= "%" . Format("{:02X}", Ord(A_LoopField))
+                }
+            }
+            return Result
         }
     }
 }
@@ -170,11 +211,13 @@ class ApiClient extends WinHttpRequest {
  * @example
  * ; an array of objects with fields "id", "name",
  * ; and optionally "nickname"
- * Array({
- *     id: Mandatory(Integer),
- *     name: Mandatory(String),
- *     nickname: String
- * })
+ * Schema := TypeToken.Of(
+ *     Array({
+ *         id: Mandatory(Integer),
+ *         name: Mandatory(String),
+ *         nickname: String
+ *     })
+ * )
  */
 class TypeToken {
     static Transform(Obj) {
@@ -206,8 +249,32 @@ class PokeApi extends ApiClient {
         Path: "/berry/" . Ident
     }
 }
-Api      := PokeApi("https://pokeapi.co/api/v2")
-Response := Api.Pokemon["pikachu"]()
+
+if (A_LineFile == A_ScriptFullPath) {
+    Api      := PokeApi("https://pokeapi.co/api/v2")
+    Response := Api.Pokemon["pikachu"]()
+    Str      := JSON.Dump(Response)
+
+    Keys := ""
+    Delim := ", "
+    for Key in Response {
+        Keys .= Key . Delim
+        if (StrLen(Keys) > 60) {
+            Keys .= "..." . Delim
+            break
+        }
+    }
+    Keys := "{" . SubStr(Keys, 1, -StrLen(Delim)) . "}"
+
+    MsgBox(Format("
+        (
+        Output: "{}"
+        Keys: {}
+        )",
+        SubStr(Str, 1, 60) . "...",
+        Keys
+    ), "ApiClient.ahk - TEST #1")
+    Keys := ""
+}
 
 ; {"abilities":[{"ability":{"name":"static","url":"https://pokeapi/ ...""
-MsgBox(JSON.Dump(Response))
