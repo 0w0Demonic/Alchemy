@@ -498,6 +498,37 @@ class PokeApi extends ApiClient {
     }
 }
 
+class GitHub extends ApiClient {
+    __New() {
+        super.__New("https://api.github.com")
+    }
+
+    static Issue(Owner, Repo, Number) => {
+        Verb: "GET",
+        Path: Format("/repos/{}/{}/issues/{}", Owner, Repo, Number),
+        Headers: {
+            Accept: "application/vnd.github+json"
+        }
+    }
+
+    static SearchIssues(Owner, Repo, Query) => {
+        Verb: "GET",
+        Path: Format("/repos/{}/{}/issues", Owner, Repo),
+        Query: Query
+    }
+}
+
+GH := GitHub()
+Str := GH.Issue("octocat", "Hello-World", 42)
+MsgBox(JSON.Dump(Str))
+
+Str := GH.SearchIssues("octocat", "Hello-World", {
+    state: "open",
+    labels: "bug,help wanted",
+    created: "desc"
+})
+MsgBox(JSON.Dump(Str))
+
 if (A_LineFile == A_ScriptFullPath) {
     Api      := PokeApi("https://pokeapi.co/api/v2")
     Response := Api.Pokemon["pikachu"]
