@@ -7,67 +7,129 @@
  * Base class for building API clients based on metadata.
  * 
  * @example
+ * class JsonPlaceholder extends ApiClient {
+ *     static Test => {
+ *         Verb: "Get",
+ *         Path: "/todos/1"
+ *     }
+ * }
+ * Client := JsonPlaceHolder("https://jsonplaceholder.typicode.com")
+ * Client.Test() ; '{"id": 1, ...}'
+ * 
+ * @description
+ * Subclasses declare endpoints as static properties with declarative metadata
+ * (HTTP verb, path, etc.), which are then exposed as callable members on
+ * client instances.
+ * 
+ * This allows you to describe REST-like APIs in a concise, declarative style
+ * instead of hand-writing boilerplate for each request.
+ * 
+ * The declared static properties return small objects that specify how the
+ * HTTP request should be sent. This object must have:
+ * 
+ * - `.Verb` (a HTTP method)
+ * - `.Path` (URL fragment, relative to the base URL)
+ * 
+ * @example
+ * static Test => {
+ *     Verb: "Get",
+ *     Path: "/todos/1"
+ * }
+ * 
+ * @description
+ * Each property can be parameterized, where e.g. keys are automatically
+ * interpolated into the endpoint path. This is extremely useful, for example,
+ * whenever the endpoint path depends on some external variable.
+ * 
+ * @example
  * class PokeApi extends ApiClient {
  *     static Pokemon[Ident] => {
  *         Verb: "Get",
  *         Path: "/pokemon/" . Ident
  *     }
  * }
- * Api := PokeApi()
- * Api.Pokemon["pikachu"]() ; {"abilities":[{"ability":{"name": ...
+ * Client := PokeApi("https://pokeapi.co/api/v2")
+ * Client.Pokemon["lycanroc-midday"] ; GET api/v2/pokemon/lycanroc-midday
  * 
  * @description
- * Subclasses declare endpoints as static properties with declarative
- * metadata (method, path, etc.), which are then exposed as callable
- * members on client instances.
+ * By adding `.Query` and `.Headers`, you can specify the query string and
+ * headers to be used in the request.
  * 
- * This allows you to describe REST-like APIs in a concise, declarative
- * style instead of hand-writing boilerplate for each request.
+ * Valid queries and headers:
  * 
- * An endpoint has to return an object with two mandatory fields
- * `.Verb` (a HTTP method) and `.Path` (path relative to the base URL).
- *  
- * @example
- * static Pokemon[Ident] => {
- *     Verb: "Get",
- *     Path: "/pokemon/" . Ident
- * }
+ * - Maps
+ * - Arrays (alternating key and value)
+ * - plain objects
  * 
- * @description
- * Use the `Query` property to create a query string to be used in the request:
+ * If the header is a plain object, underscores inside of the header will be
+ * converted to hyphens. To avoid this conversion (there's rarely ever a need
+ * to), use Maps or Arrays (alternating key and value) instead.
+ * 
+ * Using an array as value will "flatten" into multiple entries with the same
+ * key, one for each element of the array.
  * 
  * @example
- * static GetUser[id, name] => {
+ * static Example[id, name] => {
  *     Verb: "Get",
  *     Path: "/users",
- *     Query: {
- *         id: id,
- *         name: name
+ *     Query: { id: id, name: name },
+ *     Headers: {
+ *         accept: "application/json",
+ *         set_cookie: ["foo=bar", "baz=qux"]
  *     }
  * }
  * 
- * ; resolves to `.../users?id=734?name=foo`
- * Api.GetUser[734, "foo"]()
- * 
+ * ; query:
+ * ;   "?id=734?name=foo"
+ * ; headers:
+ * ;   "Accept: application/json; set-cookie: foo=bar; set-cookie: baz=qux"
+ * ; 
+ * Client.Example[734, "foo"]
+ *  
  * @description
- * Each property can be parameterized (`Ident` in the previous example),
- * where keys are automatically interpolated into the endpoint path.
- * 
- * Whenever the endpoint is parameterized, it needs to be called twice.
- * The first time to resolve a specification for the endpoint, the second
- * time for sending the actual request (for POST-requests, this accepts
- * the payload to be sent).
+ * To send a payload, pass it into the generated method.
  * 
  * @example
- * Client := PokeApi("https://pokeapi.co/api/v2")
- * Client.Pokemon["lycanroc-midday"]()
+ * ...
+ * static CreateUser => {
+ *     Verb: "Post",
+ *     Path: "/users/create"
+ * }
+ * ...
+ * Client.CreateUser({
+ *     id: 45,
+ *     name: "Blahaj",
+ *     address: "IKEA"
+ * })
+ *  
+ * @description
+ * Whenever the endpoint is parameterized, *and* the resulting HTTP verb
+ * accepts a body (see {@link ApiClient.Verbs}), it must be "called twice".
+ * The first call (either with `[...]` or `(...)` based on how you defined the
+ * property) resolves the specifics of the HTTP request, the second call
+ * accepts the payload to be sent.
+ * 
+ * @example
+ * ...
+ * ; . . . . . . .  (  ) => { . . . . . . . . . . . . . . . . . .}
+ * static UpdateUser[Id] => { Verb: "Post", Path: "/users/" . Id }
+ * 
+ * ...
+ * ; . . . . . . .  (   )({ . . . . . . . . . . . . . . . . . .})
+ * Client.UpdateUser[123]({ name: "Blavingad", address: "IKEA" })
  * 
  * @description
- * Valid property types of endpoints include:
+ * The `.Verb` property of `ApiClient` instances defines which HTTP verbs are
+ * valid, and whether they accept a body to be sent. You can make changes to
+ * the map when needed, if you're running into some issues.
  * 
- * - fields (`static Foo := { ... }`)
- * - getters (`static Foo => { ... }` or `static Foo[Bar] => { ... }`)
- * - methods (`static Foo(Args*) => { ... }`)
+ * @example
+ * class VeryWeirdApi extends ApiClient {
+ *     Verbs => (
+ *             M := super.Verbs,  ; standard verbs...
+ *             M["GET"] := true,  ; ... but for some reason GET accepts a body.
+ *             M)                 ; return back new map
+ * }
  */
 class ApiClient extends WinHttpRequest {
 /**
@@ -230,7 +292,7 @@ static __New() {
             if (!IsObject(Query)) {
                 throw TypeError("Expected an Object",, Type(Query))
             }
-            for Key, Value in GetEnumerator(Query) {
+            for Key, Value in GetEnumerator(Query, false) {
                 URL .= (A_Index == 1) ? "?" : "&"
                 URL .= UrlEncode(Key) . "=" . UrlEncode(Value)
             }
@@ -240,9 +302,9 @@ static __New() {
             Payload := JSON.Dump(Payload)
         }
 
-        ; Ad-hoc object that returns our specified enumerator
-        ; when `.OwnProps()` is called inside the `.Request() method.
-        Enumer  := GetEnumerator(Headers)
+        ; we want to trick thqby's `.Request()` to accept our own enumerator,
+        ; instead of taking `Object.Prototype.OwnProps`
+        Enumer  := GetEnumerator(Headers, true)
         Headers := Object()
         (Object.Prototype.DefineProp)(Headers, "OwnProps", {
             Call: (_) => Enumer
@@ -274,16 +336,73 @@ static __New() {
     }
 
     /**
-     * Returns an appropriate 2-argument Enumerator for an object.
+     * Returns an appropriate 2-argument `Enumerator` for the given object.
      * 
      * @param   {Object}  Obj  any object
      * @return  {Enumerator}
      */
-    static GetEnumerator(Obj) {
+    static GetEnumerator(Obj, IsHeader) {
+        if (!IsObject(Obj)) {
+            throw TypeError("Expected an Object",, Type(Obj))
+        }
+
+        ConvertHyphens := false
         switch {
-            case (Obj is Array): return Map(Obj*).__Enum(2)
-            case (Obj is Map):   return Obj.__Enum(2)
-            default:             return Obj.OwnProps()
+            ; e.g. ["foo", "bar"] => Map("foo", "bar")
+            case (Obj is Array):  Enumer := Map(Obj*).__Enum(2)
+            case (Obj is Map):    Enumer := Obj.__Enum(2)
+            default:
+                ConvertHyphens := true
+                Enumer := (Object.Prototype.OwnProps)(Obj)
+        }
+        return Decorate(Enumer, IsHeader && ConvertHyphens)
+
+        /**
+         * Decorates the given enumerator with special flattening and key
+         * conversion for plain objects.
+         * 
+         * @example
+         * Query: { foo: ["bar", "baz", "qux"] } ; "?foo=bar&foo=baz&foo=qux"
+         * 
+         * @param   {Enumerator}  Enumer          the base enumerator to be used
+         * @param   {Boolean}     ConvertHyphens  convert underscores to hyphens
+         * @return  {Enumerator}
+         */
+        static Decorate(Enumer, ConvertHyphens) {
+            static Empty(&Value) => false
+
+            BufValues := Empty
+            BufKey    := ""
+            return Impl
+
+            /**
+             * An enumerator with special flattening for arrays.
+             * 
+             * {@link WithFlattenedArrays}
+             * 
+             * @param   {VarRef<String>}  Key    output key
+             * @param   {VarRef<String>}  Value  output value
+             * @return  {Boolean}
+             */
+            Impl(&Key, &Value) {
+                Loop {
+                    if (BufValues(&Value)) {
+                        Key := BufKey
+                        return true
+                    }
+                    if (!Enumer(&Key, &Value)) {
+                        return false
+                    }
+                    if (ConvertHyphens) {
+                        Key := StrReplace(Key, "_", "-")
+                    }
+                    if (!(Value is Array)) {
+                        return true
+                    }
+                    BufValues := Value.__Enum(1)
+                    BufKey    := Key
+                }
+            }
         }
     }
 
@@ -363,7 +482,10 @@ class PokeApi extends ApiClient {
      */
     static Pokemon[Ident] => {
         Verb: "Get",
-        Path: "/pokemon/" . Ident
+        Path: "/pokemon/" . Ident,
+        Headers: {
+            set_cookie: ["A=B", "C=D"]
+        }
     }
 
     /**

@@ -163,17 +163,7 @@ reusable.
 ### How it Works
 
 To define an API client, you extend `ApiClient` and describe each endpoint using
-static properties. Each property corresponds to an API call and returns a small
-object describing how to make the request.
-
-This object **must** contain:
-
-- `Verb` (HTTP verb like "GET", "POST", etc.)
-- `Path` (relative URL fragment, e.g. `"/users/12345"`)
-
-You'll be able to add more optional stuff later (I'm having
-[big plans](#roadmap) here...), but at minimum these two
-are required.
+static properties.
 
 ```ahk
 class JsonPlaceholder extends ApiClient {
@@ -186,6 +176,17 @@ class JsonPlaceholder extends ApiClient {
 Client := JsonPlaceHolder("https://jsonplaceholder.typicode.com")
 Client.Test() ; "{ "userId": 1, ... }"
 ```
+
+Each property corresponds to an API call and returns a small object describing
+how to make the request.
+
+This object **must** contain:
+
+- `Verb` (HTTP verb like `GET`, `POST`, etc.)
+- `Path` (relative URL fragment, e.g. `"/users/12345"`)
+
+You'll be able to add more optional stuff later (I'm having
+[big plans](#roadmap) here...), but at minimum these two are required.
 
 Here, `Test` is just a static property describing a request `GET /todos/1`.
 When the `JsonPlaceholder` class loads, it turns those descriptions into
@@ -210,8 +211,10 @@ This is extremely useful for whenever the path is not fixed, but depends on
 external parameters.
 
 ```ahk
-Api := PokeApi("https://pokeapi.co/api/v2")
-Api.Pokemon["pikachu"]() ; {"abilities":[{"ability": ... }]}
+...
+
+; GET /api/v2/pokemon/pikachu
+Client.Pokemon["pikachu"]() ; {"abilities":[{"ability": ... }]}
 ```
 
 ### Query Strings and Headers
@@ -228,55 +231,92 @@ class ExampleApi extends ApiClient {
             id: id,
             name: name
         },
-        Headers:
+        Headers: {
+            accept: "application/json"
+            ; when using plain objects, this is converted to "set-cookie"
+            set_cookie: "foo=bar"
+        }
     }
 }
-
-; resolves to `https://www.example.com/users?id=734?name=foo`
-Api := ExampleApi("https://www.example.com/api/v2")
-Api.GetUser[734, "foo"]()
+; query: "?id=734&name=foo"
+; headers: "accept: application/json; set_cookie: foo=bar"
+...
+Client.GetUser[734, "foo"]
 ```
 
 Accepted values:
 
 - Maps
-- Arrays (elements of alternating key/value)
+- Arrays (alternating key/value)
 - Objects
 
-To be able to pass keys that contains hyphens (which AHK doesn't allow as
-valid symbol), you'll need to use Maps instead of plain objects. For query
-and header keys that are used multiple times, you'll need to use arrays.
+If you're using a plain object to define headers, use underscore instead of
+hyphens for the field names. They will automatically be converted. To avoid
+this conversion (there's rarely a need to do this), use Maps or Arrays instead.
 
 ```ahk
-; as map
-Query: Map("weird-key-name", "value")
+; "set-cookie: foo=bar"
+Headers: { set_cookie: "foo=bar" }
 
-; as array
-Headers: ["Set-Cookie", "foo", "Set-Cookie", "bar"]
+; "set_cookie: foo=bar"
+Headers: Map("set_cookie", "foo=bar") ; same for arrays
+```
+
+For convenience, using an array as value will "flatten" into multiple entries
+with the same key.
+
+```ahk
+; "?tag=1&tag=2&tag=3"
+Query: { tag: [1, 2, 3] }
 ```
 
 ### Payload in POST/PUT
 
-Some HTTP methods accept a payload to be sent. This is determined by the
-`static Verbs` property of each `ApiClient` subclass.
+Some HTTP methods (like `POST` and `PUT`) accept a payload to be sent.
+
+```ahk
+class Telegram extends ApiClient {
+    static SendVideo => {
+        Verb: "Post",
+        Path: "/sendVideo"
+    }
+}
+...
+Client.SendVideo({
+    chat_id: 123456,
+    video: "<awfully long string>"
+})
+```
 
 Whenever an endpoint is both variable (i.e., if it's parameterized) and accepts
-a payload, it must be "called twice":
+a payload, it must be "called twice". The first call retrieves the specifics of
+the HTTP request to be created, the second call accepts the payload to be
+sent.
+
+Like this:
 
 ```ahk
 class ExampleApi extends ApiClient {
-    static UpdateUser[Id] => {
-        Path: "/Users/" . Id
-        Verb: "POST"
-    }
+    ;  . . . . . . . (  ) => { . . . . . . . . . . . . . . . . . .}
+    static UpdateUser[Id] => { Path: "/Users/" . Id, Verb: "POST" }
 }
 
-Client := ExampleApi("https://www.example.com")
+; . . . . . . . .(   )({ . . . . . . . . . .})
+Client.UpdateUser[123]({ id: 123, name: ... })
+```
 
-Client.UpdateUser[123]("{ id: 123, name: ... }")
+Whether a HTTP verb is valid or accepts a body is determined by the
+`.Verbs` property, a map that contains each valid HTTP verb, mapped to
+`true`/`false`. You can make changes to it directly in your subclass, if
+ever needed, but there's hardly a reason to.
 
-; alternatively, if `UpdateUser` was defined as method:
-Client.UpdateUser(123)("{ ... }")
+```ahk
+class VeryWeirdApi extends ApiClient {
+    Verbs => (
+            M := super.Verbs,  ; standard verbs...
+            M["GET"] := true,  ; ... but for some reason GET accepts a body.
+            M)                 ; return back new map
+}
 ```
 
 ### Roadmap
