@@ -1,7 +1,6 @@
 #Requires AutoHotkey v2
-#Include <JSON>           ; /G33kDude/cJson.ahk
-#Include <WinHttpRequest> ; /thqby/ahk2_lib
-; #Include <AquaHotkeyX>
+#Include "%A_LineFile%/../lib/JSON.ahk"           ; /G33kDude/cJson.ahk
+#Include "%A_LineFile%/../lib/WinHttpRequest.ahk" ; /thqby/ahk2_lib
 
 /**
  * Base class for building API clients based on metadata.
@@ -27,7 +26,7 @@
  * The declared static properties return small objects that specify how the
  * HTTP request should be sent. This object must have:
  * 
- * - `.Verb` (a HTTP method)
+ * - `.Verb` (an HTTP method)
  * - `.Path` (URL fragment, relative to the base URL)
  * 
  * @example
@@ -148,7 +147,10 @@ __New(BaseUrl, UserAgent?) {
     this.DefineProp("BaseUrl", { Get: (_) => BaseUrl })
 }
 
-/** Static init. */
+/**
+ * Static init that converts the user-defined static properties into useable
+ * methods.
+ */
 static __New() {
     static Prop   := (Object.Prototype.GetOwnPropDesc)
     static Define := (Object.Prototype.DefineProp)
@@ -205,7 +207,8 @@ static __New() {
     }
 
     /**
-     * Creates a function that uses a fixed endpoint to create HTTP requests.
+     * Creates a function that uses a fixed endpoint object
+     * to create HTTP requests.
      * 
      * @param   {Object}  Endpoint  the specified endpoint
      * @return  {Closure}
@@ -225,17 +228,17 @@ static __New() {
     }
 
     /**
-     * Creates a function that uses an endpoint returned by the given
+     * Creates a function that uses an endpoint object returned by the given
      * getter function.
      * 
-     * @param   {Func}  Getter  getter method that retrieves an endpoint
+     * @param   {Func}  Getter  getter method that retrieves an endpoint object
      * @return  {Closure}
      */
     static CreateNoArgGetter(Getter) {
         return NoArgGetter
 
         /**
-         * Sends an HTTP request using an endpoint returned by a getter
+         * Sends an HTTP request using an endpoint object returned by a getter
          * function.
          * 
          * @param   {Any?}  Payload  the data to be sent
@@ -247,8 +250,8 @@ static __New() {
     }
 
     /**
-     * Creates a new property descriptor to be used as API endpoint,
-     * from the given input property descriptor previously defined by the user.
+     * Generates a useable API endpoint method based on the previously
+     * defined property descriptor of the class.
      * 
      * @param   {Object}  PropDesc  previously defined property
      * @return  {Object}
@@ -257,14 +260,17 @@ static __New() {
         switch {
             case (ObjHasOwnProp(PropDesc, "Value")):
                 return { Call: CreateFixedUrlEndpoint(PropDesc.Value) }
+
             case (ObjHasOwnProp(PropDesc, "Get")):
                 return (PropDesc.Get.MinParams > 0)
                     ? { Get: CreateVariableUrlEndpoint(PropDesc.Get) }
                     : { Call: CreateNoArgGetter(PropDesc.Get) }
+
             case (ObjHasOwnProp(PropDesc, "Call")):
                 return (PropDesc.Call.MinParams > 0)
                     ? { Call: CreateVariableUrlEndpoint(PropDesc.Call) }
                     : { Call: CreateNoArgGetter(PropDesc.Call) }
+
             default: throw ValueError("Invalid property")
         }
     }
@@ -282,11 +288,9 @@ static __New() {
         }
         Path    := Endpoint.Path
         Verb    := Endpoint.Verb
-        Headers := (ObjHasOwnProp(Endpoint, "Headers"))
-                    ? Endpoint.Headers
-                    : {}
+        Headers := (ObjHasOwnProp(Endpoint, "Headers")) ? Endpoint.Headers : {}
+        URL     := Client.BaseUrl . Path
 
-        URL := Client.BaseUrl . Path
         if (ObjHasOwnProp(Endpoint, "Query")) {
             Query := Endpoint.Query
             if (!IsObject(Query)) {
@@ -303,7 +307,7 @@ static __New() {
         }
 
         ; we want to trick thqby's `.Request()` to accept our own enumerator,
-        ; instead of taking `Object.Prototype.OwnProps`
+        ; instead of taking `(Object.Prototype.OwnProps)(Obj)`
         Enumer  := GetEnumerator(Headers, true)
         Headers := Object()
         (Object.Prototype.DefineProp)(Headers, "OwnProps", {
@@ -464,96 +468,11 @@ Verbs => (
  *     })
  * )
  */
-class TypeToken {
-    static Transform(Obj) {
-        ; (TODO)
-    }
-}
+
+; class TypeToken {
+;     static Transform(Obj) {
+;         ; (TODO)
+;     }
+; }
 
 ; <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
-/**
- * Small example that uses https://pokeapi.co
- */
-class PokeApi extends ApiClient {
-    /**
-     * Pokémon are the creatures that inhabit the world of the ...
-     * @param  {Primitive}  Ident  name or id of the pokemon
-     */
-    static Pokemon[Ident] => {
-        Verb: "Get",
-        Path: "/pokemon/" . Ident,
-        Headers: {
-            set_cookie: ["A=B", "C=D"]
-        }
-    }
-
-    /**
-     * Berries are small fruits that can provide HP and status ...
-     * @param  {Primitive}  Ident  name or id of the berry
-     */
-    static Berry[Ident] => {
-        Verb: "Get",
-        Path: "/berry/" . Ident
-    }
-}
-
-class GitHub extends ApiClient {
-    __New() {
-        super.__New("https://api.github.com")
-    }
-
-    static Issue(Owner, Repo, Number) => {
-        Verb: "GET",
-        Path: Format("/repos/{}/{}/issues/{}", Owner, Repo, Number),
-        Headers: {
-            Accept: "application/vnd.github+json"
-        }
-    }
-
-    static SearchIssues(Owner, Repo, Query) => {
-        Verb: "GET",
-        Path: Format("/repos/{}/{}/issues", Owner, Repo),
-        Query: Query
-    }
-}
-
-GH := GitHub()
-Str := GH.Issue("octocat", "Hello-World", 42)
-MsgBox(JSON.Dump(Str))
-
-Str := GH.SearchIssues("octocat", "Hello-World", {
-    state: "open",
-    labels: "bug,help wanted",
-    created: "desc"
-})
-MsgBox(JSON.Dump(Str))
-
-if (A_LineFile == A_ScriptFullPath) {
-    Api      := PokeApi("https://pokeapi.co/api/v2")
-    Response := Api.Pokemon["pikachu"]
-    Str      := JSON.Dump(Response)
-
-    Keys := ""
-    Delim := ", "
-    for Key in Response {
-        Keys .= Key . Delim
-        if (StrLen(Keys) > 60) {
-            Keys .= "..." . Delim
-            break
-        }
-    }
-    Keys := "{" . SubStr(Keys, 1, -StrLen(Delim)) . "}"
-
-    MsgBox(Format("
-        (
-        Output: "{}"
-        Keys: {}
-        )",
-        SubStr(Str, 1, 60) . "...",
-        Keys
-    ), "ApiClient.ahk - TEST #1")
-    Keys := ""
-}
-
-; {"abilities":[{"ability":{"name":"static","url":"https://pokeapi/ ...""
