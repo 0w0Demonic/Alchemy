@@ -319,6 +319,50 @@ class VeryWeirdApi extends ApiClient {
 }
 ```
 
+### Behavior of the Generated Method
+
+Some specifics of how exactly the methods are being generated. Most of it
+should be intuitive, but I'd recommend skimming through this section before
+getting started.
+
+**Example 1**:
+
+If you're defined either a regular field, or a getter-property/method with
+*zero parameters*, always use a regular method call to send a request to the
+REST API. The first argument, if present, resembles the body to be sent:
+
+```ahk
+Client.Foo()     ; without body
+Client.Foo(Body) ; with body
+```
+
+**Example 2**:
+
+Otherwise, if the property/method is parameterized, the behavior depends on
+*whether the HTTP verb implies that the request accepts bodies*.
+
+If it doesn't, use a regular method call or property access, depending on how
+you defined your endpoint:
+
+```ahk
+Client.Foo["bar"] ; if defined as property
+Client.Foo("bar") ; if defined as method
+```
+
+**Example 3**:
+
+Otherwise, if your endpoint has to be interpolated with parameters, *and*
+accepts a body, you have to "call twice". The first call resolves the endpoint
+to be used (see example 2), the second call accepts a body and sends the
+request (see example 1):
+
+```ahk
+Body := { baz: "qux" }
+...
+Client.Foo["bar"](Body) ; if defined as property
+Client.Foo("bar")(Body) ; if defined as property
+```
+
 ### Roadmap
 
 #### Validation and Data Binding
