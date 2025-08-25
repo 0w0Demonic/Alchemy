@@ -30,69 +30,39 @@ around.
 
 ## Map Chains
 
-Our first little exhibit of this repo is the `MapChain` type. It's a special
-type of map that can optionally be linked to a "parent" map. Whenever a key
-lookup fails, the map will continue its search in the parent map, and so on.
-
-If you need tree-like structures, or map entries that you can override in
-certain contexts, this might be the perfect thing for you.
-
-To create a new map chain, start by creating the "root map" like this:
+*A map with prototype-style inheritance*.
 
 ```ahk
-A := MapChain.Base("foo", "bar", "hello", "world!")
-```
+A := MapChain.Base("foo", "bar", "hello", "world")
+B := A.Extend("foo", "bar!!!", "apple", "banana")
 
-Then, you can create a second map that builds on the previous one:
-
-```ahk
-B := A.Extend("foo", "baz", "apple", "banana")
-
-; alternatives:
-; B := MapChain.Extend(A, ...)
-; B := MapChain(A, ...)
-```
-
-Another way to create a map chain is to use the `MapChain.From()` and
-`MapChain.CloneFrom()`
-
-You'll end up with a map that can inherit from its parent.
-
-```ahk
+B["foo"]   ; "bar!!!"
+B["apple"] ; "banana"
 B["hello"] ; "world"
 ```
 
-Notice that we've just overridden the key-value pair behind `"foo"`. Although
-this entry is still present inside of the parent map (`A`), the deriving map
-defines its own entry.
+These maps can optionally be linked a to a "parent" map to fall back to,
+whenever a key lookup fails. The map will then continue its search down the
+chain of parents.
 
-```ahk
-A["foo"] ; "bar"
-B["foo"] ; "baz"
-```
+Originally, I needed this class for my
+[Yako](https://www.github.com/0w0Demonic/Yako) repository to hold a collection
+of callback functions. It had to be:
 
-You can build surprisingly elaborate structures with this. The interface is
-modeled closely after AutoHotkey’s built-in `Map`, but `MapChain` includes
-extra properties and methods to help distinguish between inherited and direct
-entries. `Own[...]`, for example, narrows the scope to just that particular
-map. As an example:
+- accessible via message number;
+- overridable in further subclasses;
+- dynamic (simply add to the map for a visible change).
 
-```ahk
-B.HasOwn("foo") ; explicitly searches `B`, without falling back to its parent
-```
+This worked *extremely* well, which is why I've taken the time to write a
+much more sophisticated version to showcase here.
 
-Beyond that, there are a few methods unique to map chains:
+If you need hierarchical structures similar to this, it might be *the*
+ideal thing for you <sub>(maybe even tree-like? I should test this
+out...)</sub>.
 
-- `.Chain`: returns an array of all maps in the inheritance chain,
-  starting from the current map and moving up.
-- `.Root`: gives back the top-most map in the chain.
-- `.Depth`: the number of maps in the chain, including the current one.
-- `.Flatten()`: produces a plain map containing all top-level keys,
-  with later maps in the chain overriding earlier ones.
+See also:
 
-I think the rest will speak for itself when looking through the doc comments,
-and I'm hoping you can build something fun out of this; as much as I myself had
-fun putting this together.
+- [docs](./docs/MapChain.md)
 
 ## Cascades
 
@@ -126,7 +96,7 @@ Create a new cascade by using `Cascade.Create(Obj)` or `Cascade.Transform(Obj)`:
 ```ahk
 Theme := { ... }
 
-Obj := Cascade.Create(Theme) ; create a clone
+Obj := Cascade.Create(Theme) ; create a deep clone
 Cascade.Transform(Theme)     ; change in place
 ```
 
@@ -352,15 +322,15 @@ Client.Foo("bar") ; if defined as method
 **Example 3**:
 
 Otherwise, if your endpoint has to be interpolated with parameters, *and*
-accepts a body, you have to "call twice". The first call resolves the endpoint
-to be used (see example 2), the second call accepts a body and sends the
-request (see example 1):
+accepts a body, you have to "call twice". First, resolve the endpoint to be
+used (see example 2). Then finally, use a method call to send the request,
+optionally passing the body to be sent.
 
 ```ahk
 Body := { baz: "qux" }
 ...
 Client.Foo["bar"](Body) ; if defined as property
-Client.Foo("bar")(Body) ; if defined as property
+Client.Foo("bar")(Body) ; if defined as method
 ```
 
 ### Roadmap
