@@ -8,12 +8,28 @@
  */
 class Alchemist
 {
-static CreateClass(BaseClass := Object, PropertyName := "(unnamed)") {
+/**
+ * Creates a new class based on the given `BaseClass`.
+ * 
+ * If the base class extends any other native class except for `Object`
+ * or `Class`, this method fails below version v2.1-alpha.3.
+ * 
+ * @example
+ * Test := Alchemist.CreateClass("Test")
+ * 
+ * MsgBox(Type(Test))     ; "Class"
+ * MsgBox(Type(Test()))   ; "Test"
+ * 
+ * @param   {Class?}   BaseClass  base of the new class
+ * @param   {String?}  Name       name of the new class
+ * @return  {Class}
+ */
+static CreateClass(Name := "(unnamed)", BaseClass := Object) {
     if (!(BaseClass is Class)) {
         throw TypeError("Expected a Class",, Type(BaseClass))
     }
-    if (IsObject(PropertyName)) {
-        throw TypeError("Expected a String",, Type(PropertyName))
+    if (IsObject(Name)) {
+        throw TypeError("Expected a String",, Type(Name))
     }
     if (VerCompare(A_AhkVersion, "v2.1-alpha.3") >= 0) {
         Cls := Class(BaseClass)
@@ -23,10 +39,27 @@ static CreateClass(BaseClass := Object, PropertyName := "(unnamed)") {
         ObjSetBase(Cls, BaseClass)
         ObjSetBase(Cls.Prototype, BaseClass.Prototype)
     }
-    Cls.Prototype.__Class := PropertyName
+    Cls.Prototype.__Class := Name
     return Cls
 }
 
+/**
+ * Creates a new class that is enclosed in the given object `Obj`.
+ * 
+ * @example
+ * A := Alchemist.CreateClass("A")
+ * B := Alchemist.CreateNestedClass(A, "B")
+ * ; alternatively:
+ * ; B := A.CreateNestedClass("B")
+ * 
+ * Obj := A.B()
+ * MsgBox(Type(Obj)) ; "A.B"
+ * 
+ * @param   {Class}   Class         the enclosing class
+ * @param   {String}  PropertyName  name of the assigned property
+ * @param   {Class?}  BaseClass     base of the new class
+ * @return  {Class}
+ */
 static CreateNestedClass(Obj, PropertyName, BaseClass := Object) {
     if (!(Obj is Class)) {
         throw TypeError("Expected a Class",, Type(Obj))
@@ -35,7 +68,7 @@ static CreateNestedClass(Obj, PropertyName, BaseClass := Object) {
         throw TypeError("Expected a String",, Type(PropertyName))
     }
     Name := Obj.Prototype.__Class . "." . PropertyName
-    Cls := Alchemist.CreateClass(BaseClass, Name)
+    Cls := Alchemist.CreateClass(Name, BaseClass)
     (Object.Prototype.DefineProp)(Obj, PropertyName, {
         Get: (_) => Cls,
         Call: (_, Args*) => Cls(Args*)
@@ -44,8 +77,158 @@ static CreateNestedClass(Obj, PropertyName, BaseClass := Object) {
     return Cls
 }
 
+/**
+ * Modifies the class to support private fields.
+ * Every field starting with one underscore (e.g. `_foo`) is seen as
+ * private.
+ * 
+ * @example
+ * class MyClass {
+ *     _foo() => "bar"
+ *     Foo() => this._Foo()
+ * }
+ * Alchemist.Privatize(MyClass)
+ * 
+ * MsgBox(MyClass.Foo()) ; "bar"
+ * MsgBox(MyClass._foo()) ; [[ Error! ... has no method called "_foo". ]]
+ * 
+ * @description
+ * Most of this works by:
+ * - Creating a new class that extends the base class
+ * - Moving private fields (beginning with one underscore) into the subclass
+ * - Changing the base to the subclass on public properties to "elevate access"
+ * 
+ * Here's a simplified version of what's happening:
+ * 
+ * @example
+ * ; before conversion
+ * class A {
+ *     Foo() => this._foo()
+ *     _Foo() => MsgBox("private method!")
+ * }
+ * 
+ * @example
+ * ; after conversion
+ * class A {
+ *     Foo() {
+ *         ObjSetBase(this, B.Prototype) ; "elevate access"
+ *         try {
+ *             Result := this._Foo()
+ *         } catch as e {
+ *         }
+ *         ObjSetBase(this, A.Prototype) ; change back to regular base
+ *         if (IsSet(e)) {
+ *             throw e
+ *         }
+ *         return Result
+ *     }
+ * }
+ * ; (unreachable generated class)
+ * class B extends A {
+ *     _Foo() {
+ *         MsgBox("private method!")
+ *     }
+ * }
+ * 
+ * @param   {Class}  Cls  the class to be privatized
+ * @return  {Class}
+ */
 static PrivatizeClass(Cls) {
-    
+    static Define := (Object.Prototype.DefineProp)
+    static Delete := (Object.Prototype.DeleteProp)
+    static GetProp := (Object.Prototype.GetOwnPropDesc)
+
+    BaseClass := Cls
+    BaseClassName := BaseClass.Prototype.__Class
+    Subclass := Alchemist.CreateClass(BaseClassName . "(internal)", BaseClass)
+
+    BaseClassProto := BaseClass.Prototype
+    SubclassProto  := Subclass.Prototype
+
+    Transfer(BaseClass, Subclass, "Prototype", "__New")
+    Transfer(BaseClassProto, SubclassProto, "__Set")
+
+    static Transfer(Public, Private, ExcludedProps*) {
+        for PropertyName in GetProperties(Public, ExcludedProps*) {
+            PropDesc := GetProp(Public, PropertyName)
+            if (IsPrivateField(PropertyName)) {
+                Delete(Public, PropertyName)
+                Define(Private, PropertyName, PropDesc)
+            } else {
+                ConvertToElevatingPropDesc(PropDesc, Public, Private)
+                Define(Public, PropertyName, PropDesc)
+            }
+        }
+    }
+
+    static ConvertToElevatingPropDesc(PropDesc, Public, Private) {
+        if (ObjHasOwnProp(PropDesc, "Get")) {
+            PropDesc.Get := CreateImpersonation(PropDesc.Get, Public, Private)
+        }
+        if (ObjHasOwnProp(PropDesc, "Set")) {
+            PropDesc.Set := CreateImpersonation(PropDesc.Set, Public, Private)
+        }
+        if (ObjHasOwnProp(PropDesc, "Call")) {
+            PropDesc.Call := CreateImpersonation(PropDesc.Call, Public, Private)
+        }
+        return PropDesc
+    }
+
+    static CreateImpersonation(Callback, Public, Private) {
+        if ((Public is Class) && (Private is Class)) {
+            return ImpersonatedClass
+        }
+        return ImpersonatedInstance
+
+        ImpersonatedInstance(Instance, Args*) {
+            ObjSetBase(Instance, Private)
+            try {
+                Result := Callback(Instance, Args*)
+            } catch as e {
+                ; (empty)
+            }
+            ObjSetBase(Instance, Public)
+            if (IsSet(e)) {
+                throw e
+            }
+            return Result
+        }
+
+        ImpersonatedClass(Instance, Args*) {
+            BaseObj := ObjGetBase(Public)
+            ObjSetBase(Private, BaseObj)
+            ObjSetBase(Public, Private)
+            try {
+                Result := Callback(Instance, Args*)
+            } catch as e {
+                ; (empty)
+            }
+            ObjSetBase(Public, BaseObj)
+            ObjSetBase(Private, Public)
+            if (IsSet(e)) {
+                throw e
+            }
+            return Result
+        }
+    }
+
+    static GetProperties(Target, ExcludedProps*) {
+        Props := Map()
+        Props.CaseSense := false
+        for PropertyName in ObjOwnProps(Target) {
+            Props.Set(PropertyName, true)
+        }
+        for ExcludedProp in ExcludedProps {
+            if (Props.Has(ExcludedProp)) {
+                Props.Delete(ExcludedProp)
+            }
+        }
+        return Props
+    }
+
+    static IsPrivateField(PropertyName) => (PropertyName ~= "^_[^_]")
+
+    return Cls
 }
 
 /**
@@ -80,7 +263,7 @@ class AquaHotkey_Extensions
         }
 
         CreateSubclass(ClassName?) {
-            return Alchemist.CreateClass(this, ClassName?)
+            return Alchemist.CreateClass(ClassName?, this)
         }
 
         Privatize() {
@@ -287,8 +470,19 @@ Logging(Callback) {
     }
 }
 
-Obj := Object()
-Obj.DefineProp("Test", PropertyDescriptor()
-        .Get.Constantly(34).With(Logging)
-        .Set.Throwing(TypeError))
+class Test {
+    _foo() => MsgBox("private method!")
 
+    Foo() => this._foo()
+}
+Alchemist.PrivatizeClass(Test)
+
+Obj := Test()
+
+Obj.Foo()
+Obj._foo()
+
+; Obj := Object()
+; Obj.DefineProp("Test", PropertyDescriptor()
+;         .Get.Constantly(34).With(Logging)
+;         .Set.Throwing(TypeError))
