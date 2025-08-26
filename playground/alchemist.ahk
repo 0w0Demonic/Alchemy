@@ -138,15 +138,70 @@ static PrivatizeClass(Cls) {
     static Delete := (Object.Prototype.DeleteProp)
     static GetProp := (Object.Prototype.GetOwnPropDesc)
 
+    static Access := Map()
+
     BaseClass := Cls
     BaseClassName := BaseClass.Prototype.__Class
     Subclass := Alchemist.CreateClass(BaseClassName . "(internal)", BaseClass)
 
+    Access.Set(BaseClass, Subclass)
+
     BaseClassProto := BaseClass.Prototype
     SubclassProto  := Subclass.Prototype
 
+    __Set := CreateMetaSetter(BaseClassProto, SubclassProto)
+    static__Set := CreateMetaSetter(BaseClass, Subclass)
+
+    Define(BaseClass, "__Set", static__Set)
+    Define(BaseClassProto, "__Set", __Set)
+
+    __Init := CreateInitializer(BaseClassProto, SubclassProto)
+    Define(BaseClassProto, "__Init", __Init)
+
+    Define(BaseClassProto, "__Delete", { Call: Destructor })
+
     Transfer(BaseClass, Subclass, "Prototype", "__New")
-    Transfer(BaseClassProto, SubclassProto, "__Set")
+    Transfer(BaseClassProto, SubclassProto, "__Set", "__New", "__Init", "__Delete")
+
+    return Cls
+
+    static Destructor(Instance) {
+        Access.Delete(ObjPtr(Instance))
+    }
+
+    static CreateInitializer(BaseClassProto, SubclassProto) {
+        if (HasProp(BaseClassProto, "__Init") &&
+                (BaseClassProto.__Init != Object.Prototype.__Init)) {
+            Callback := BaseClassProto.__Init
+            return { Call: __InitEx }
+        }
+        return { Call: __Init }
+
+        __Init(Instance) {
+            PrivateAccess := Object()
+            ObjSetBase(PrivateAccess, SubclassProto)
+            Access.Set(ObjPtr(Instance), PrivateAccess)
+        }
+
+        __InitEx(Instance) {
+            PrivateAccess := Object()
+            ObjSetBase(PrivateAccess, SubclassProto)
+            Access.Set(ObjPtr(Instance), PrivateAccess)
+            Callback(Instance)
+        }
+    }
+
+    static CreateMetaSetter(BaseClassProto, SubclassProto) {
+        return { Call: __Set }
+
+        __Set(Instance, PropertyName, Params, Value) {
+            Define(IsPrivateField(PropertyName)
+                            ? Access.Get(ObjPtr(Instance))
+                            : Instance,
+                    PropertyName,
+                    { Value: Value })
+        }
+    }
 
     static Transfer(Public, Private, ExcludedProps*) {
         for PropertyName in GetProperties(Public, ExcludedProps*) {
@@ -175,40 +230,10 @@ static PrivatizeClass(Cls) {
     }
 
     static CreateImpersonation(Callback, Public, Private) {
-        if ((Public is Class) && (Private is Class)) {
-            return ImpersonatedClass
-        }
-        return ImpersonatedInstance
+        return Impersonated
 
-        ImpersonatedInstance(Instance, Args*) {
-            ObjSetBase(Instance, Private)
-            try {
-                Result := Callback(Instance, Args*)
-            } catch as e {
-                ; (empty)
-            }
-            ObjSetBase(Instance, Public)
-            if (IsSet(e)) {
-                throw e
-            }
-            return Result
-        }
-
-        ImpersonatedClass(Instance, Args*) {
-            BaseObj := ObjGetBase(Public)
-            ObjSetBase(Private, BaseObj)
-            ObjSetBase(Public, Private)
-            try {
-                Result := Callback(Instance, Args*)
-            } catch as e {
-                ; (empty)
-            }
-            ObjSetBase(Public, BaseObj)
-            ObjSetBase(Private, Public)
-            if (IsSet(e)) {
-                throw e
-            }
-            return Result
+        Impersonated(Instance, Args*) {
+            return Callback(Access.Get(ObjPtr(Instance)), Args*)
         }
     }
 
@@ -227,8 +252,6 @@ static PrivatizeClass(Cls) {
     }
 
     static IsPrivateField(PropertyName) => (PropertyName ~= "^_[^_]")
-
-    return Cls
 }
 
 /**
@@ -471,16 +494,22 @@ Logging(Callback) {
 }
 
 class Test {
-    _foo() => MsgBox("private method!")
+    _foo := 12
+    Foo := 23
 
-    Foo() => this._foo()
+    GetFoo() => this._foo
 }
 Alchemist.PrivatizeClass(Test)
 
-Obj := Test()
+Loop {
+    Sleep(200)
+    Obj := Test()
+}
+MsgBox(Obj.Foo) ; 23
+MsgBox(Obj.GetFoo()) ; 12
+MsgBox(Obj._foo) ; Error! ... has no property named "_foo".
 
-Obj.Foo()
-Obj._foo()
+
 
 ; Obj := Object()
 ; Obj.DefineProp("Test", PropertyDescriptor()
