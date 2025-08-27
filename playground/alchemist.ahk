@@ -137,131 +137,74 @@ static PrivatizeClass(Cls) {
     static Define := (Object.Prototype.DefineProp)
     static Delete := (Object.Prototype.DeleteProp)
     static GetProp := (Object.Prototype.GetOwnPropDesc)
+    static Debug(FormatString, Args*) {
+        OutputDebug(Format("[Alchemist] " . FormatString . "`r`n", Args*))
+    }
 
-    static Access := Map()
+    ; paranoia
+    if (!(Cls is Class)) {
+        throw TypeError("Expected a Class",, Type(Cls))
+    }
+    ; even more paranoia
+    if (!ObjHasOwnProp(Cls, "Prototype")) {
+        throw UnsetError("Class has no prototype of its own")
+    }
+
 
     BaseClass := Cls
     BaseClassName := BaseClass.Prototype.__Class
-    Subclass := Alchemist.CreateClass(BaseClassName . "(internal)", BaseClass)
 
-    Access.Set(BaseClass, Subclass)
+    Debug("######## Privatizing class: '{1}' ########", BaseClassName)
+
+    SubclassName := BaseClassName . "(internal)"
+    Debug("creating subclass:")
+    Debug("    {1} extends {2} {{} ... {}}", SubclassName, BaseClassName)
+    Debug("done.")
+    
+    ; create a new subclass to move all "private fields" into
+    Subclass := Alchemist.CreateClass(SubclassName, BaseClass)
 
     BaseClassProto := BaseClass.Prototype
     SubclassProto  := Subclass.Prototype
 
-    __Set := CreateMetaSetter(BaseClassProto, SubclassProto)
-    static__Set := CreateMetaSetter(BaseClass, Subclass)
+    ; define `static __Set()`
+    Debug("defining '{1}.__Set()'", BaseClassName)
+    Define(BaseClass, "__Set", MetaSetter(Subclass))
 
-    Define(BaseClass, "__Set", static__Set)
-    Define(BaseClassProto, "__Set", __Set)
+    ; define `__Set()`
+    Debug("defining '{1}.Prototype.__Set()'", BaseClassName)
+    Define(BaseClassProto, "__Set", MetaSetter(SubclassProto))
 
-    __Init := CreateInitializer(BaseClassProto, SubclassProto)
-    Define(BaseClassProto, "__Init", __Init)
+    ; transform existing properties of the class
+    Debug("modifying static properties ({1}):", BaseClassName)
+    Transfer(BaseClass, Subclass, "Prototype", "__Set")
+    Debug("done.")
 
-    Define(BaseClassProto, "__Delete", { Call: Destructor })
-
-    Transfer(BaseClass, Subclass,
-            "Prototype", "__New")
-
-    Transfer(BaseClassProto, SubclassProto,
-            "__Set", "__New",
-            "__Init", "__Delete")
-
+    Debug("modifying instance properties ({1}.Prototype):", BaseClassName)
+    Transfer(BaseClassProto, SubclassProto, "__Set")
+    Debug("done.")
+    Debug("----------------------------------------------")
     return Cls
 
+
     /**
-     * `__Delete()` method that removes the weak reference from the `Access`
-     * map.
+     * Converts all existing properties in the class/prototype to support
+     * private fields. This is done by moving private fields from `Public` into
+     * the deriving `Private`.
      * 
-     * @param   {Object}  Instance  object that called the destructor
-     */
-    static Destructor(Instance) {
-        Access.Delete(ObjPtr(Instance))
-    }
-
-    /**
-     * @return  {Closure}
-     */
-    static CreateInitializer(BaseClassProto, SubclassProto) {
-        if (HasProp(BaseClassProto, "__Init") &&
-                (BaseClassProto.__Init != Object.Prototype.__Init)) {
-            Callback := BaseClassProto.__Init
-            return { Call: __InitEx }
-        }
-        return { Call: __Init }
-
-        __Init(Instance) {
-            PrivateAccess := Object()
-            ObjSetBase(PrivateAccess, SubclassProto)
-            Access.Set(ObjPtr(Instance), PrivateAccess)
-        }
-
-        __InitEx(Instance) {
-            PrivateAccess := Object()
-            ObjSetBase(PrivateAccess, SubclassProto)
-            Access.Set(ObjPtr(Instance), PrivateAccess)
-            Callback(Instance)
-        }
-    }
-
-    /**
-     * 
-     */
-    static CreateMetaSetter(BaseClassProto, SubclassProto) {
-        return { Call: __Set }
-
-        __Set(Instance, PropertyName, Params, Value) {
-            if (IsPrivateField(PropertyName)) {
-                Field := CreatePrivateField(Value, SubclassProto)
-                Define(Instance, PropertyName, Field)
-            } else {
-                Field := CreateField(Value)
-                Define(Instance, PropertyName, Field)
-            }
-        }
-    }
-
-    /**
-     * 
-     */
-    static CreatePrivateField(Value, Private) {
-        return { Get: Getter, Set: Setter }
-
-        Getter(Instance) {
-            if (!HasBase(Instance, Private)) {
-                throw MemberError("Private field")
-            }
-            return Value
-        }
-        Setter(Instance, NewValue) {
-            if (!HasBase(Instance, Private)) {
-                throw MemberError("Private field")
-            }
-            Value := NewValue
-        }
-    }
-
-    static CreateField(Value) {
-        return { Get: Getter, Set: Setter }
-
-        Getter(Instance) {
-            return Value
-        }
-        Setter(Instance, NewValue) {
-            Value := NewValue
-        }
-    }
-
-    /**
-     * 
+     * @param   {Object}   Public         base object (public access)
+     * @param   {Object}   Private        deriving object (private access)
+     * @param   {String*}  ExcludedProps  list of properties to be ignored
      */
     static Transfer(Public, Private, ExcludedProps*) {
         for PropertyName in GetProperties(Public, ExcludedProps*) {
             PropDesc := GetProp(Public, PropertyName)
             if (IsPrivateField(PropertyName)) {
+                Debug("    private : '{1}'", PropertyName)
                 Delete(Public, PropertyName)
                 Define(Private, PropertyName, PropDesc)
             } else {
+                Debug("    public  : '{1}'", PropertyName)
                 ConvertToElevatingPropDesc(PropDesc, Public, Private)
                 Define(Public, PropertyName, PropDesc)
             }
@@ -269,48 +212,9 @@ static PrivatizeClass(Cls) {
     }
 
     /**
-     * 
-     */
-    static ConvertToElevatingPropDesc(PropDesc, Public, Private) {
-        if (ObjHasOwnProp(PropDesc, "Get")) {
-            PropDesc.Get := CreateImpersonation(PropDesc.Get, Public, Private)
-        }
-        if (ObjHasOwnProp(PropDesc, "Set")) {
-            PropDesc.Set := CreateImpersonation(PropDesc.Set, Public, Private)
-        }
-        if (ObjHasOwnProp(PropDesc, "Call")) {
-            PropDesc.Call := CreateImpersonation(PropDesc.Call, Public, Private)
-        }
-        return PropDesc
-    }
-
-    /**
-     * 
-     */
-    static CreateImpersonation(Callback, Public, Private) {
-        return Impersonated
-
-        /**
-         * 
-         */
-        Impersonated(Instance, Args*) {
-            ObjSetBase(Instance, Private)
-            try {
-                Result := Callback(Instance, Args*)
-            } catch as e {
-                ; (empty)
-            }
-            ObjSetBase(Instance, Public)
-            if (IsSet(e)) {
-                throw e
-            }
-            return Result
-        }
-    }
-
-    /**
      * Collects all property names of the given object, excluding the ones
-     * specified in `ExcludedProps`.
+     * specified in `ExcludedProps`. This is done to avoid modifying properties
+     * during an `ObjOwnProps()`-loop.
      * 
      * @param   {Object}   Target         the object to retrieve properties from
      * @param   {String*}  ExcludedProps  properties to be excluded
@@ -331,6 +235,156 @@ static PrivatizeClass(Cls) {
     }
 
     /**
+     * Converts properties seen as public to "elevate access" before calling
+     * their original implementation.
+     * 
+     * @param   {Object}  PropDesc  property descriptor to be converted
+     * @param   {Object}  Public    base object (public access)
+     * @param   {Object}  Private   deriving object (private access)
+     */
+    static ConvertToElevatingPropDesc(PropDesc, Public, Private) {
+        if (ObjHasOwnProp(PropDesc, "Get")) {
+            PropDesc.Get := CreateImpersonation(PropDesc.Get, Public, Private)
+        }
+        if (ObjHasOwnProp(PropDesc, "Set")) {
+            PropDesc.Set := CreateImpersonation(PropDesc.Set, Public, Private)
+        }
+        if (ObjHasOwnProp(PropDesc, "Call")) {
+            PropDesc.Call := CreateImpersonation(PropDesc.Call, Public, Private)
+        }
+        return PropDesc
+    }
+
+    /**
+     * Creates a closure that "elevates access" to the deriving object before
+     * calling the given `Callback`.
+     * 
+     * @param   {Func}    Callback  the function to be called
+     * @param   {Object}  Public    base object (public access)
+     * @param   {Object}  Private   deriving object (private access)
+     */
+    static CreateImpersonation(Callback, Public, Private) {
+        if ((Public is Class) && (Private is Class)) {
+            return ImpersonatedClass
+        }
+        return ImpersonatedInstance
+
+        ImpersonatedClass(Instance, Args*) {
+            return Callback(Private, Args*)
+        }
+
+        ImpersonatedInstance(Instance, Args*) {
+            ObjSetBase(Instance, Private)
+            try {
+                Result := Callback(Instance, Args*)
+            } catch as e {
+                ; (empty)
+            }
+            ObjSetBase(Instance, Public)
+            if (IsSet(e)) {
+                throw e
+            }
+            return Result
+        }
+    }
+
+    /**
+     * Defines new `__Set` and `static __Set` for the given class.
+     * Whenever the class or an instance declares a new field, a new
+     * field is created whose "access permission" can be validated.
+     * 
+     * @param   {Object}  Private  hidden 
+     */
+    static MetaSetter(Private) {
+        if (Private is Class) {
+            return { Call: static__Set }
+        }
+        return { Call: __Set }
+
+        /**
+         * Method that is called, when the instance declares a new field.
+         * A new "pseudo-field" is created (i.e.: a regular property with `Get`
+         * and `Set` with equivalent behavior). Depending on the property name,
+         * the type of the object is validated to ensure it has
+         * "elevated access", otherwise an error is thrown.
+         * 
+         * @param   {Object}  Instance      instance that declares the property
+         * @param   {String}  PropertyName  name of the property
+         * @param   {Array}   Params        params in square brackets (ignored)
+         * @param   {Any}     Value         the value that was assigned
+         */
+        __Set(Instance, PropertyName, Params, Value) {
+            ; TODO add validation so that the object can only set new fields
+            ;      with elevated access?
+            if (IsPrivateField(PropertyName)) {
+                ; create field with validation
+                Field := CreateField(Value, Private)
+            } else {
+                ; create field without validation
+                Field := CreateField(Value)
+            }
+            ; define new field
+            Define(Instance, PropertyName, Field)
+        }
+
+        /**
+         * This method is called when a new field is assigned from the class
+         * itself. There's no need to do any tricky validation, just assign
+         * the field to the hidden subclass depending on the name.
+         * 
+         * @param   {Class}   Instance      class that declares the property
+         * @param   {String}  PropertyName  name of the property
+         * @param   {Array}   Params        params in square brackets (ignored)
+         * @param   {Any}     Value         the value that was assigned
+         */
+        static__Set(Instance, PropertyName, Params, Value) {
+            ; Property descriptor for a regular field
+            Field := { Value: Value }
+            ; If the property is private, assign it to the subclass. Otherwise,
+            ; assign to the current class.
+            Define(IsPrivateField(PropertyName) ? Private : Instance,
+                    PropertyName, Field)
+        }
+    }
+
+    /**
+     * Creates a "pseudo-field", i.e. a dynamic property with `Get` and `Set`,
+     * that can optionally be validated for access.
+     * 
+     * @param   {Any}      Value    any value
+     * @param   {Object?}  Private  reference to the subclass's prototype
+     * @return  {Object}
+     */
+    static CreateField(Value, Private?) {
+        if (IsSet(Private)) {
+            return { Get: PrivateGetter, Set: PrivateSetter }
+        } else {
+            return { Get: Getter, Set: Setter }
+        }
+
+        Getter(Instance) {
+            return Value
+        }
+        Setter(Instance, NewValue) {
+            Value := NewValue
+        }
+
+        PrivateGetter(Instance) {
+            if (!HasBase(Instance, Private)) {
+                throw MemberError("Private field")
+            }
+            return Value
+        }
+
+        PrivateSetter(Instance, NewValue) {
+            if (!HasBase(Instance, Private)) {
+                throw MemberError("Private field")
+            }
+            Value := NewValue
+        }
+    }
+
+    /**
      * Determines whether the given property name is seen as private.
      * 
      * @param   {String}  PropertyName  any property name
@@ -340,7 +394,7 @@ static PrivatizeClass(Cls) {
 }
 
 /**
- * AquaHotkey package, which is applied if the library is present in the script.
+ * AquaHotkey-style extensions, applied if the library is available.
  */
 class AquaHotkey_Extensions
 {
@@ -371,12 +425,10 @@ class AquaHotkey_Extensions
         }
 
         CreateSubclass(ClassName?) {
-            return Alchemist.CreateClass(ClassName?, this)
+            Alchemist.CreateClass(ClassName?, this)
         }
 
-        Privatize() {
-
-        }
+        Privatize() => Alchemist.PrivatizeClass(this)
     }
 } ; class AquaHotkey_Extensions
 } ; class Alchemist
@@ -578,20 +630,14 @@ Logging(Callback) {
     }
 }
 
-class Test {
-    _foo := 12
-    Foo := 23
-
-    GetFoo() => this._foo
-}
-Alchemist.PrivatizeClass(Test)
-
-Obj := Test()
-MsgBox(Obj.Foo) ; 23
-MsgBox(Obj.GetFoo()) ; 12
-MsgBox(Obj._foo) ; Error! ... has no property named "_foo".
-
-
+; class Test {
+;     static _foo := 12
+;     static Foo := 23
+; 
+;     static GetFoo() => this._foo
+;     static GetBar() => this._bar
+; }
+; Alchemist.PrivatizeClass(Test)
 
 ; Obj := Object()
 ; Obj.DefineProp("Test", PropertyDescriptor()
