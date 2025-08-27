@@ -160,15 +160,28 @@ static PrivatizeClass(Cls) {
 
     Define(BaseClassProto, "__Delete", { Call: Destructor })
 
-    Transfer(BaseClass, Subclass, "Prototype", "__New")
-    Transfer(BaseClassProto, SubclassProto, "__Set", "__New", "__Init", "__Delete")
+    Transfer(BaseClass, Subclass,
+            "Prototype", "__New")
+
+    Transfer(BaseClassProto, SubclassProto,
+            "__Set", "__New",
+            "__Init", "__Delete")
 
     return Cls
 
+    /**
+     * `__Delete()` method that removes the weak reference from the `Access`
+     * map.
+     * 
+     * @param   {Object}  Instance  object that called the destructor
+     */
     static Destructor(Instance) {
         Access.Delete(ObjPtr(Instance))
     }
 
+    /**
+     * @return  {Closure}
+     */
     static CreateInitializer(BaseClassProto, SubclassProto) {
         if (HasProp(BaseClassProto, "__Init") &&
                 (BaseClassProto.__Init != Object.Prototype.__Init)) {
@@ -191,18 +204,57 @@ static PrivatizeClass(Cls) {
         }
     }
 
+    /**
+     * 
+     */
     static CreateMetaSetter(BaseClassProto, SubclassProto) {
         return { Call: __Set }
 
         __Set(Instance, PropertyName, Params, Value) {
-            Define(IsPrivateField(PropertyName)
-                            ? Access.Get(ObjPtr(Instance))
-                            : Instance,
-                    PropertyName,
-                    { Value: Value })
+            if (IsPrivateField(PropertyName)) {
+                Field := CreatePrivateField(Value, SubclassProto)
+                Define(Instance, PropertyName, Field)
+            } else {
+                Field := CreateField(Value)
+                Define(Instance, PropertyName, Field)
+            }
         }
     }
 
+    /**
+     * 
+     */
+    static CreatePrivateField(Value, Private) {
+        return { Get: Getter, Set: Setter }
+
+        Getter(Instance) {
+            if (!HasBase(Instance, Private)) {
+                throw MemberError("Private field")
+            }
+            return Value
+        }
+        Setter(Instance, NewValue) {
+            if (!HasBase(Instance, Private)) {
+                throw MemberError("Private field")
+            }
+            Value := NewValue
+        }
+    }
+
+    static CreateField(Value) {
+        return { Get: Getter, Set: Setter }
+
+        Getter(Instance) {
+            return Value
+        }
+        Setter(Instance, NewValue) {
+            Value := NewValue
+        }
+    }
+
+    /**
+     * 
+     */
     static Transfer(Public, Private, ExcludedProps*) {
         for PropertyName in GetProperties(Public, ExcludedProps*) {
             PropDesc := GetProp(Public, PropertyName)
@@ -216,6 +268,9 @@ static PrivatizeClass(Cls) {
         }
     }
 
+    /**
+     * 
+     */
     static ConvertToElevatingPropDesc(PropDesc, Public, Private) {
         if (ObjHasOwnProp(PropDesc, "Get")) {
             PropDesc.Get := CreateImpersonation(PropDesc.Get, Public, Private)
@@ -229,14 +284,38 @@ static PrivatizeClass(Cls) {
         return PropDesc
     }
 
+    /**
+     * 
+     */
     static CreateImpersonation(Callback, Public, Private) {
         return Impersonated
 
+        /**
+         * 
+         */
         Impersonated(Instance, Args*) {
-            return Callback(Access.Get(ObjPtr(Instance)), Args*)
+            ObjSetBase(Instance, Private)
+            try {
+                Result := Callback(Instance, Args*)
+            } catch as e {
+                ; (empty)
+            }
+            ObjSetBase(Instance, Public)
+            if (IsSet(e)) {
+                throw e
+            }
+            return Result
         }
     }
 
+    /**
+     * Collects all property names of the given object, excluding the ones
+     * specified in `ExcludedProps`.
+     * 
+     * @param   {Object}   Target         the object to retrieve properties from
+     * @param   {String*}  ExcludedProps  properties to be excluded
+     * @return  {Array<String>}
+     */
     static GetProperties(Target, ExcludedProps*) {
         Props := Map()
         Props.CaseSense := false
@@ -251,6 +330,12 @@ static PrivatizeClass(Cls) {
         return Props
     }
 
+    /**
+     * Determines whether the given property name is seen as private.
+     * 
+     * @param   {String}  PropertyName  any property name
+     * @return  {Boolean}
+     */
     static IsPrivateField(PropertyName) => (PropertyName ~= "^_[^_]")
 }
 
@@ -501,10 +586,7 @@ class Test {
 }
 Alchemist.PrivatizeClass(Test)
 
-Loop {
-    Sleep(200)
-    Obj := Test()
-}
+Obj := Test()
 MsgBox(Obj.Foo) ; 23
 MsgBox(Obj.GetFoo()) ; 12
 MsgBox(Obj._foo) ; Error! ... has no property named "_foo".
