@@ -1,39 +1,27 @@
-#Requires AutoHotkey v2
+#Requires AutoHotkey v2.0
 
 /**
  * A structure of objects that "cascade" similar to CSS selectors. Works
  * perfectly for context-based theme settings, which was the original intent
  * behind writing this class.
  * 
- * Objects inside this structure fall back to their sibling objects with
- * the same name, e.g. `Theme.Button.Font` inherits from `Theme.Font` (see
- * below) and then, finally, the top-most enclosing object (i.e. `Theme`).
+ * Objects inside this structure fall back to their enclosing objects.
  * 
  * @example
  * Theme := {
  *     Button: {
- *         Font: { ; this object...
- *             Name: "Cascadia Code" ; pun not intended - literally best font
- *         }
+ *         font_size: 12
  *     },
- *     Font: { ; inherits from this object!
- *         Size: 12
- *     }
- *     Opt: "..."
+ *     font_name: "Cascadia Code" ; pun not intended
  * }
- * Cascade.Transform(Theme) ; alternatively: `Theme := Cascade.Create(Theme)`
  * 
- * Font := Theme.Button.Font
- * MsgBox(Font.Name) ; "Cascadia Code"
- * MsgBox(Font.Size) ; 12
+ * MsgBox(Theme.Button.font_size) ; 12
+ * MsgBox(Theme.Button.font_name) ; "Cascadia Code"
  * 
  * @description
- * In the example above, `Theme.Button.Font` inherits its values from
- * `Theme.Font`, and then from `Theme`.
- * 
- * There are two ways to create cascading objects. You have the option to create
- * a deep clone (`Cascade.Create(Obj)`) or to transform the given object in
- * place (`Cascade.Transform(Obj)`).
+ * You can create a cascading object by:
+ * - {@link Cascade.Transform transforming an object}
+ * - {@link Cascade.Create creating a deep clone of an object}
  * 
  * @example
  * Theme := { ... }
@@ -53,21 +41,26 @@
  * ; class is automatically `.Transform()`-ed when loaded
  * class Theme extends ClassCascade {
  *     class Button {
- *         class Font {
- *             Name => "Cascadia Code"
- *         }
+ *         font_name => "Cascadia Code"
  *     }
- *     class Font {
- *         Size => 12
- *     }
+ *     font_size => 12
  * }
- * ButtonTheme := Theme.Button
- * Font := ButtonTheme.Font()
- * MsgBox(ButtonTheme.Size) ; 12
+ * 
+ * ButtonTheme := Theme.Button()
+ * MsgBox(ButtonTheme.font_name) ; "Cascadia Code"
+ * MsgBox(ButtonTheme.font_size) ; 12
  * 
  * @author 0w0Demonic
  */
 class Cascade {
+    /**
+     * Standard constructor that defaults to `.Transform()`.
+     * 
+     * @param   {Object}  Obj  any object
+     * @return  {Object}
+     */
+    static Call(Obj) => this.Transform(Obj)
+
     /**
      * Enables cascading behavior on the given object in place.
      * 
@@ -78,50 +71,35 @@ class Cascade {
         if (!IsObject(Obj)) {
             throw TypeError("Expected an Object",, Type(Obj))
         }
+        AsClass := (this == ClassCascade || HasBase(this, ClassCascade))
+        if (AsClass && !(Obj is Class)) {
+            throw TypeError("Expected a Class",, Type(Obj))
+        }
 
-        Seen := Map()
-        Seen.CaseSense := false
-        OverridePrototypes := (this == ClassCascade
-                    || HasBase(this, ClassCascade))
-
-        Traverse(Obj, Seen, OverridePrototypes, true)
+        Traverse(Obj, AsClass)
         return Obj
 
-        static Traverse(Obj, Seen, OverridePrototypes, IsRoot) {
+        /**
+         * Traverses the object recursively, changing the base of each nested
+         * object to its enclosing object.
+         * 
+         * @param   {Object}   Obj      the object to be traversed
+         * @param   {Boolean}  AsClass  whether prototypes should be overridden
+         */
+        static Traverse(Obj, AsClass) {
             for Key, Value in ObjOwnProps(Obj) {
                 if (!IsSet(Value) || !IsObject(Value)) {
                     continue
                 }
-                if (OverridePrototypes
-                        && (Value is Class)
-                        && Key == "Prototype") {
+                if (AsClass && (Obj is Class) && (Key == "Prototype")) {
                     continue
                 }
-                switch {
-                    case IsRoot:        Base := Obj
-                    case Seen.Has(Key): Base := Seen.Get(Key)
-                    default:
-                        Seen.Set(Key, Value)
-                        continue
+                ObjSetBase(Value, Obj)
+                if (AsClass && (Value is Class)
+                            && (ObjHasOwnProp(Value, "Prototype"))) {
+                    ObjSetBase(Value.Prototype, Obj.Prototype)
                 }
-                ObjSetBase(Value, Base)
-                if (OverridePrototypes
-                        && (Value is Class) && (Base is Class)
-                        && ObjHasOwnProp(Value, "Prototype")
-                        && ObjHasOwnProp(Base, "Prototype")) {
-                    ObjSetBase(Value.Prototype, Base.Prototype)
-                }
-                Seen.Set(Key, Value)
-            }
-
-            for Key, Value in ObjOwnProps(Obj) {
-                if (!IsSet(Value) || !IsObject(Value)) {
-                    continue
-                }
-                if ((Value is Class) && Key == "Prototype") {
-                    continue
-                }
-                Traverse(Obj.%Key%, Seen.Clone(), OverridePrototypes, false)
+                Traverse(Value, AsClass)
             }
         }
     }
@@ -140,65 +118,46 @@ class Cascade {
             throw TypeError("Expected an Object",, Type(Obj))
         }
 
-        Seen := Map()
-        Seen.CaseSense := false
-        OverridePrototypes := (this == ClassCascade
-                    || HasBase(this, ClassCascade))
+        AsClass := (this == ClassCascade) || HasBase(this, ClassCascade)
+        if (AsClass && !(Obj is Class)) {
+            throw TypeError("Expected a Class",, Type(Obj))
+        }
 
         Result := Object()
         ObjSetBase(Result, Cascade.Prototype)
-        return Traverse(Obj, Result, Seen, OverridePrototypes, true)
+        Traverse(Obj, Result, AsClass)
+        return Result
 
-        Traverse(Obj, Result, Seen, OverridePrototypes, IsRoot) {
+        /**
+         * Traverses the object recursively, creating a values-only deep clone
+         * of the object in the process.
+         * 
+         * @param   {Object}   Obj      object to be traversed
+         * @param   {Object}   Result   output object
+         * @param   {Boolean}  AsClass  whether prototypes should be overridden
+         */
+        static Traverse(Obj, Result, AsClass) {
             for Key, Value in ObjOwnProps(Obj) {
-                if (OverridePrototypes
-                        && (Obj is Class)
-                        && (Key == "Prototype")) {
-                    continue
-                }
                 if (!IsSet(Value)) {
                     continue
                 }
-
-                ClonedValue := (IsObject(Value) ? Clone(Value) : Value)
-                Define(Result, Key, { Value: ClonedValue })
-
+                if (AsClass && (Obj is Class) && (Key == "Prototype")) {
+                    continue
+                }
                 if (!IsObject(Value)) {
+                    Define(Result, Key, { Value: Value })
                     continue
                 }
-
-                switch {
-                    case IsRoot:        Base := Obj
-                    case Seen.Has(Key): Base := Seen.Get(Key)
-                    default:
-                        Seen.Set(Key, ClonedValue)
-                        continue
+                ClonedValue := Clone(Value)
+                ObjSetBase(ClonedValue, Result)
+                if (AsClass && (ClonedValue is Class)
+                            && ObjHasOwnProp(ClonedValue, "Prototype")
+                            && ObjHasOwnProp(Result, "Prototype")) {
+                    ObjSetBase(ClonedValue.Prototype, Result.Prototype)
                 }
-
-                ObjSetBase(ClonedValue, Base)
-                if (OverridePrototypes
-                        && (ClonedValue is Class) && (Base is Class)
-                        && ObjHasOwnProp(ClonedValue, "Prototype")
-                        && ObjHasOwnProp(Base, "Prototype")) {
-                    ObjSetBase(ClonedValue.Prototype, Base.Prototype)
-                }
-                Seen.Set(Key, ClonedValue)
+                Define(Result, Key, { Value: ClonedValue })
+                Traverse(Obj.%Key%, Result.%Key%, AsClass)
             }
-
-            for Key, Value in ObjOwnProps(Obj) {
-                if ((Obj is Class) && (Key == "Prototype")) {
-                    continue
-                }
-                if (!IsSet(Value) || !IsObject(Value)) {
-                    continue
-                }
-                Traverse(Obj.%Key%,
-                         Result.%Key%,
-                         Seen.Clone(),
-                         OverridePrototypes,
-                         false)
-            }
-            return Result
         }
     }
 }
@@ -210,42 +169,9 @@ class Cascade {
  * including their prototypes.
  * 
  * Using `ClassCascade` as base class automatically enables cascading by
- * applying `.Transform()`. Alternatively, you can use
- * `ClassCascade.Transform(Cls)` and `ClassCascade.Create(Cls)` instead.
+ * applying `.Transform()` to itself. Alternatively, you can use either
+ * `ClassCascade.Transform(Cls)` or `ClassCascade.Create(Cls)`.
  */
-class ClassCascade extends Cascade {
-    /** Static init. */
-    static __New() {
-        if (this == ClassCascade) {
-            return
-        }
-        this.Transform(this)
-    }
-}
-
-/** Example that uses `CascadingClass` to define a theme object. */
-class Theme extends ClassCascade {
-    class Button {
-        class Font {
-            Name => "Cascadia Code"
-        }
-    }
-    class Font {
-        Size => 12
-    }
-}
-
-if (A_LineFile == A_ScriptFullPath) {
-    ButtonTheme := Theme.Button
-    Font := ButtonTheme.Font()
-    FormatStr := "
-    (
-    Font name: {}
-    - defined by: Theme.Button.Font.Prototype.Name.Get
-
-    Font size: {}
-    - defined by: Theme.Font.Prototype.Size.Get
-    )"
-    Output := Format(FormatStr, Font.Name, Font.Size)
-    MsgBox(Output, "Cascade.ahk - TEST #1")
+class ClassCascade {
+    static __New() => (this == ClassCascade) || this.Transform(this)
 }

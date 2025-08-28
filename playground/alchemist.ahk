@@ -433,194 +433,6 @@ class AquaHotkey_Extensions
 } ; class AquaHotkey_Extensions
 } ; class Alchemist
 
-/**
- * 
- * @example
- * 
- * PropertyDescriptor() ; create new property descriptor
- *     .Get.Constantly(42) ; create getter that always returns 42
- *     .Set.Nop() ; create setter that does nothing
- *     .Define(Obj, "Test") ; define property descriptor as `Obj.Test`
- */
-class PropertyDescriptor {
-    /**
-     * 
-     */
-    static From(Obj, PropertyName) {
-        PropDesc := (Object.Prototype.GetOwnPropDesc)(Obj, PropertyName)
-        ObjSetBase(PropDesc, PropertyDescriptor.Prototype)
-        return PropDesc
-    }
-
-    /**
-     * 
-     */
-    static DeletedFrom(Obj, PropertyName) {
-        PropDesc := (Object.Prototype.GetOwnPropDesc)(Obj, PropertyName)
-        (Object.Prototype.DeleteProp)(Obj, PropertyName)
-        ObjSetBase(PropDesc, PropertyDescriptor.Prototype)
-        return PropDesc
-    }
-
-    /**
-     * Selects
-     */
-    Get  => this._Select("Get")
-
-    /**
-     * 
-     */
-    Set  => this._Select("Set")
-
-    /**
-     * 
-     */
-    Call => this._Select("Call")
-
-    /**
-     * 
-     */
-    Get(Getter)  => this._Customize("Get", Getter)
-
-    /**
-     * 
-     */
-    Set(Setter)  => this._Customize("Set", Setter)
-
-    /**
-     * 
-     */
-    Call(Method) => this._Customize("Call", Method)
-
-    /**
-     * Defines this property descriptor for the given object and property name.
-     * 
-     * @param   {Object}  TargetObj     
-     * @param   {String}  PropertyName  
-     * @return  {this}
-     */
-    Define(TargetObj, PropertyName) {
-        PropDesc := this.Clone()
-        ObjSetBase(PropDesc, Object.Prototype)
-        PropDesc.Target := unset
-        (Object.Prototype.DefineProp)(TargetObj, PropertyName, PropDesc)
-        return this
-    }
-
-    /**
-     * 
-     */
-    _Select(PropertyName) {
-        this.Target := PropertyName
-        ObjSetBase(this, PropertyDescriptor.Select.Prototype)
-        return this
-    }
-
-    /**
-     * 
-     */
-    _Customize(PropertyName, Callback) {
-        this.Target := PropertyName
-        ObjSetBase(this, PropertyDescriptor.Customize.Prototype)
-        return this
-    }
-
-    /**
-     * 
-     */
-    class Select extends PropertyDescriptor {
-        /**
-         * 
-         */
-        Constantly(Value) {
-            return this._AddValue(Constantly)
-
-            Constantly(*) {
-                return Value
-            }
-        }
-
-        /**
-         * 
-         */
-        Remove() {
-            (Object.Prototype.DeleteProp)(this, this.Target)
-            ObjSetBase(this, PropertyDescriptor.Prototype)
-            return this
-        }
-
-        /**
-         * 
-         */
-        Nop() {
-            return this._AddValue(Nop)
-
-            Nop(*) {
-                return ""
-            }
-        }
-
-        /**
-         * 
-         */
-        Throwing(Err) {
-            if (Err is Func) {
-                return this._AddValue(Throwing)
-            }
-            if (!(Err is Class)) {
-                throw TypeError("Expected an Error class or Func",, Type(Err))
-            }
-            if (!(Err == Error) && !HasBase(Err, Error)) {
-                throw ValueError("Not an Error class",, Err.Prototype.__Class)
-            }
-            return this._AddValue(Throwing)
-
-            Throwing(*) {
-                throw Err()
-            }
-        }
-
-        /**
-         * 
-         */
-        _AddValue(f) {
-            (Object.Prototype.DefineProp)(this, this.Target, { Value: f })
-            ObjSetBase(this, PropertyDescriptor.Customize.Prototype)
-            return this
-        }
-    }
-
-    /**
-     * 
-     */
-    class Customize extends PropertyDescriptor {
-        /**
-         * 
-         */
-        ByName(Name) {
-            if (IsObject(Name)) {
-                throw TypeError("Expected a String",, Type(Name))
-            }
-        }
-
-        /**
-         * 
-         */
-        With(Decoration) {
-            Target := this.Target
-            this.%Target% := Decoration(this.%Target%)
-            return this
-        }
-
-        /**
-         * 
-         */
-        ImpersonatedAs(Obj) {
-
-        }
-    }
-}
-
 Logging(Callback) {
     return Logged
 
@@ -643,3 +455,35 @@ Logging(Callback) {
 ; Obj.DefineProp("Test", PropertyDescriptor()
 ;         .Get.Constantly(34).With(Logging)
 ;         .Set.Throwing(TypeError))
+
+class GuiTemplates extends AquaHotkey {
+    class Old_Gui extends AquaHotkey_Backup {
+        static __New() => super.__New(Gui)
+    }
+    class Gui {
+        Add(Ctl, Args*) {
+            if (!IsObject(Ctl)) {
+                return (GuiTemplates.Old_Gui.Prototype.Add)(this, Ctl, Args*)
+            }
+            if (!(Ctl is Class)) {
+                throw TypeError("Expected a String or Class object",, Type(Ctl))
+            }
+            if (Ctl.Prototype.__Init != Object.Prototype.__Init) {
+                (Ctl.Prototype.__Init)(this)
+            }
+            (Ctl.Prototype.__New)(this, Args*)
+            ; TODO return something useful here...
+        }
+
+        class Edit {
+            
+        }
+    } ; class Gui
+} ; class GuiTemplates
+
+class EditTemplate {
+    __New(Text) {
+        this.AddText("", Text)
+        this.AddEdit("r1 w350")
+    }
+}

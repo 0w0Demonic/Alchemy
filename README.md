@@ -69,35 +69,18 @@ See also:
 `Cascade`, originally meant for making context-based theme objects, can
 be used to create objects that participate in a "cascading behavior".
 
-Objects inside this structure fall back to their sibling objects with the same
-name, e.g.:
+Objects inside this structure fall back to their enclosing objects.
 
 ```ahk
-Theme := {
+Theme := Cascade({
     Button: {
-        Font: { ; <-- this object...
-            Name: "Cascadia Code"
-        }
+        font_name: "Cascadia Code" ; pun not intended
     },
-    Font: { ; <-- ...inherits from this object!
-        Size: 12
-    }
-} ; <-- ...and then finally from the root.
+    font_size: 12
+})
 
-Cascade.Transform(Theme) ; alternatively: `Theme := Cascade.Create(Theme)`
-
-Font := Theme.Button.Font
-MsgBox(Font.Name) ; "Cascadia Code" ; pun not intended, it's a good font fr.
-MsgBox(Font.Size) ; 12
-```
-
-Create a new cascade by using `Cascade.Create(Obj)` or `Cascade.Transform(Obj)`:
-
-```ahk
-Theme := { ... }
-
-Obj := Cascade.Create(Theme) ; create a deep clone
-Cascade.Transform(Theme)     ; change in place
+MsgBox(Theme.Button.font_name) ; "Cascadia Code"
+MsgBox(Theme.Button.font_size) ; 12
 ```
 
 Use `ClassCascade`, when working with classes. Works exactly the same, except
@@ -106,17 +89,14 @@ that using it as base will automatically `.Transform()` it for you.
 ```ahk
 class Theme extends ClassCascade {
     class Button {
-        class Font {
-            Name => "Cascadia Code"
-        }
+        Font_Name => "Cascadia Code"
     }
-    class Font {
-        Size => 12
-    }
+    Font_Size => 12
 }
-ButtonTheme := Theme.Button
-Font := ButtonTheme.Font()
-MsgBox(ButtonTheme.Size) ; 12
+ButtonTheme := Theme.Button()
+
+MsgBox(ButtonTheme.Font_Name) ; "Cascadia Code"
+MsgBox(ButtonTheme.Font_Size) ; 12
 ```
 
 ## API Mapper
