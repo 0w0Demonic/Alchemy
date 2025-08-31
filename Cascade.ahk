@@ -173,5 +173,10 @@ class Cascade {
  * `ClassCascade.Transform(Cls)` or `ClassCascade.Create(Cls)`.
  */
 class ClassCascade {
-    static __New() => (this == ClassCascade) || this.Transform(this)
+    static __New() {
+        if (this != ClassCascade) {
+            Cascade.Transform(this)
+            ObjSetBase(this, Object)
+        }
+    }
 }
