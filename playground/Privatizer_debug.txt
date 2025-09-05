@@ -1,0 +1,24 @@
+[DEBUG] ######## Privatizing class: 'Foo' ########
+[DEBUG] 
+[DEBUG] creating subclass:
+[DEBUG]     Foo(private) extends Foo { ... }
+[DEBUG] done.
+[DEBUG] 
+[DEBUG] defining 'Foo.__Set()'
+[DEBUG] defining 'Foo.Prototype.__Set()'
+[DEBUG] done.
+[DEBUG] 
+[DEBUG] modifying static properties (Foo):
+[DEBUG]     public               : __Init
+[DEBUG]     public               : Prototype
+[DEBUG] done.
+[DEBUG] 
+[DEBUG] modifying instance properties (Foo.Prototype):
+[DEBUG]     public               : __Class
+[DEBUG]     private property     : _a
+[DEBUG]     public               : a
+[DEBUG]     public               : GetFoo
+[DEBUG]     public               : SetFoo
+[DEBUG] done.
+[DEBUG] 
+[DEBUG] ----------------------------------------------

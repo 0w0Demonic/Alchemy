@@ -12,7 +12,7 @@ class Privatizer {
 
         ; some debug output (absolutely life-saving for something like this)
         static Debug(FormatString, Args*) {
-            OutputDebug(Format("[Alchemist] " . FormatString . "`r`n", Args*))
+            OutputDebug(Format("[DEBUG] " . FormatString . "`r`n", Args*))
         }
 
         if (!(Target is Class)) {
@@ -25,23 +25,44 @@ class Privatizer {
         SubclassName := BaseClassName . "(private)"
 
         Debug("######## Privatizing class: '{1}' ########", BaseProto.__Class)
+        Debug("")
         Debug("creating subclass:")
         Debug("    {1} extends {2} {{} ... {}}", SubclassName, BaseClassName)
         Subclass  := CreateSubclass(BaseClass, SubclassName)
         SubProto  := Subclass.Prototype
         Debug("done.")
-
-        ; define own `__Set()` and `static __Set()` properties to handle
-        ; incoming new fields. It also prevents setting private fields without
-        ; calling with elevated rights.
+        Debug("")
         Debug("defining '{1}.__Set()'", BaseClassName)
         Define(BaseClass, "__Set", StaticMetaSetter(BaseClass, Subclass))
         Debug("defining '{1}.Prototype.__Set()'", BaseClassName)
         Define(BaseProto, "__Set", MetaSetter(BaseClass, Subclass))
-
+        Debug("done.")
+        Debug("")
         Debug("modifying static properties ({1}):", BaseClassName)
-        ; iterate through all properties of the base class
         for PropertyName, PropDesc in FindProps(BaseClass, "__Set") {
+            ConvertStaticProp(PropertyName, PropDesc)
+        }
+        Debug("done.")
+        Debug("")
+        Debug("modifying instance properties ({1}.Prototype):", BaseClassName)
+        for PropertyName, PropDesc in FindProps(BaseProto, "__Set") {
+            ConvertInstanceProp(PropertyName, PropDesc)
+        }
+        Debug("done.")
+        Debug("")
+        Debug("----------------------------------------------")
+        return
+
+; >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+        /**
+         * Converts regular static properties of the class into ones that
+         * support the use of private fields.
+         * 
+         * @param   {String}  PropertyName  name of the property
+         * @param   {Object}  PropDesc      property descriptor object
+         */
+        ConvertStaticProp(PropertyName, PropDesc) {
             if (IsPrivate(PropertyName)) {
                 ; move private static to the subclass
                 Debug("    {1:-20} : {2}", "private", PropertyName)
@@ -55,11 +76,15 @@ class Privatizer {
                         PublicStaticProp(PropDesc, BaseClass, Subclass))
             }
         }
-        Debug("done.")
 
-        Debug("modifying instance properties ({1}.Prototype):", BaseClassName)
-        ; iterate though all properties of the base prototype
-        for PropertyName, PropDesc in FindProps(BaseProto, "__Set") {
+        /**
+         * Converts regular instance properties of the class into ones that
+         * support the use of private fields.
+         * 
+         * @param   {String}  PropertyName  name of the property
+         * @param   {Object}  PropDesc      property descriptor object
+         */
+        ConvertInstanceProp(PropertyName, PropDesc) {
             switch {
                 ; decorate public instance properties with
                 ; "temporary elevation" to the subclass, enabling full access
@@ -69,7 +94,7 @@ class Privatizer {
                     Define(BaseProto, PropertyName,
                             PublicProp(PropDesc, BaseProto, SubProto))
 
-                ; validate private fields to check they've been accessed from
+                ; validate private fields to ensure they've been accessed from
                 ; the elevated subclass
                 case (IsField(PropDesc)):
                     Debug("    {1:-20} : {2}", "private field", PropertyName)
@@ -83,11 +108,6 @@ class Privatizer {
                     Define(SubProto, PropertyName, PropDesc)
             }
         }
-        Debug("done.")
-        Debug("----------------------------------------------")
-        return
-
-; >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
         /**
          * Creates a subclass of the given `BaseClass`
@@ -152,7 +172,7 @@ class Privatizer {
          * @return  {Object}
          */
         static PublicStaticProp(PropDesc, Public, Private) {
-            return ConvertProp(PropDesc, Impersonation)
+            return DecorateProp(PropDesc, Impersonation)
 
             Impersonation(Callback) {
                 return Impersonated
@@ -174,7 +194,7 @@ class Privatizer {
          * @return  {Object}
          */
         static PublicProp(PropDesc, Public, Private) {
-            return ConvertProp(PropDesc, Elevation)
+            return DecorateProp(PropDesc, Elevation)
 
             Elevation(Callback) {
                 return Elevated
@@ -201,7 +221,7 @@ class Privatizer {
          * @param   {Func}    Decorator  decorator to be used
          * @return  {Object}
          */
-        static ConvertProp(PropDesc, Decorator) {
+        static DecorateProp(PropDesc, Decorator) {
             if (IsField(PropDesc)) {
                 return PropDesc
             }
