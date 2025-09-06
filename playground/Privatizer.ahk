@@ -2,27 +2,23 @@
 
 class Privatizer {
     static Transform(Target) {
-        ; `.DefineProp()`, paranoia edition
-        static Define  := (Object.Prototype.DefineProp)
-        static Delete  := (Object.Prototype.DeleteProp)
-        static GetProp := (Object.Prototype.GetOwnPropDesc)
-
+        ; >>>>>>>>>>>>>>>
+        ; 
         ; all descriptors for dynamic properties
         static Descriptors := Array("Get", "Set", "Call")
-
-        ; some debug output (absolutely life-saving for something like this)
-        static Debug(FormatString, Args*) {
-            OutputDebug(Format("[DEBUG] " . FormatString . "`r`n", Args*))
-        }
-
+        ; 
+        ; Used with `Debug()`
+        static DebugFormat := ("    {1:-20} : {2}")
+        ; 
+        ; >>>>>>>>>>>>>>>
+        
         if (!(Target is Class)) {
             throw TypeError("Expected a Class",, Type(Target))
         }
-
-        BaseClass := Target
-        BaseProto := BaseClass.Prototype
+        BaseClass     := Target
+        BaseProto     := BaseClass.Prototype
         BaseClassName := BaseProto.__Class
-        SubclassName := BaseClassName . "(private)"
+        SubclassName  := BaseClassName . "(private)"
 
         Debug("######## Privatizing class: '{1}' ########", BaseProto.__Class)
         Debug("")
@@ -50,10 +46,105 @@ class Privatizer {
         }
         Debug("done.")
         Debug("")
+        Debug("defining '{1}.DefineProp()'", BaseClassName)
+        Define(BaseClass, "DefineProp",
+                CreateStaticDefineProp(BaseClass, Subclass))
+        Debug("defining '{1}.Prototype.DefineProp()'", BaseClassName)
+        Define(BaseProto, "DefineProp",
+                CreateDefineProp(BaseClass, Subclass))
+        Debug("done.")
         Debug("----------------------------------------------")
         return
 
 ; >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+        /**
+         * `Object.Prototype.DefineProp()`.
+         * 
+         * @param   {Object}  Obj           any object
+         * @param   {String}  PropertyName  name of the property
+         * @param   {Object}  PropDesc      property descriptor
+         * @return  {Object}
+         */
+        static Define(Obj, PropertyName, PropDesc) {
+            return (Object.Prototype.DefineProp)(Obj, PropertyName, PropDesc)
+        }
+
+        /**
+         * `Object.Prototype.DeleteProp()`.
+         * 
+         * @param   {Object}  Obj           any object
+         * @param   {String}  PropertyName  name of the property
+         * @return  {Object}
+         */
+        static Delete(Obj, PropertyName) {
+            return (Object.Prototype.DeleteProp)(Obj, PropertyName)
+        }
+
+        /**
+         * `Object.Prototype.GetOwnPropDesc()`.
+         * 
+         * @param   {Object}  Obj           any object
+         * @param   {String}  PropertyName  name of the property
+         * @return  {Object}
+         */
+        static GetProp(Obj, PropertyName) {
+            return (Object.Prototype.GetOwnPropDesc)(Obj, PropertyName)
+        }
+
+        /**
+         * Debug output (absolutely life-saving).
+         * 
+         * @param   {String}  FormatString  format string to be used
+         * @param   {Any*}    Args          zero or more arguments
+         */
+        static Debug(FormatString, Args*) {
+            OutputDebug(Format("[DEBUG] " . FormatString . "`r`n", Args*))
+            ; FileAppend(Format("[DEBUG] " . FormatString . "`r`n", Args*),
+            ;            "Privatizer_debug.txt")
+        }
+
+        /**
+         * Creates a custom `static DefineProp()` with additional validation.
+         * 
+         * @param   {Class}  Public   base class
+         * @param   {Class}  Private  hidden subclass
+         * @return  {Object}
+         */
+        CreateStaticDefineProp(Public, Private) {
+            return { Call: StaticDefineProp }
+
+            StaticDefineProp(this, PropName, PropDesc) {
+                ; MsgBox(this.Prototype.__Class)
+
+                if (IsPrivate(PropName) && (this != Private)) {
+                    throw Error("Private property", -2)
+                }
+                ConvertStaticProp(PropName, PropDesc)
+                return this
+            }
+        }
+
+        /**
+         * Creates a custom `static DefineProp()` with additional validation.
+         * 
+         * @param   {Class}  Public   base class
+         * @param   {Class}  Private  hidden subclass
+         * @return  {Object}
+         */
+        CreateDefineProp(Public, Private) {
+            return { Call: DefineProp }
+
+            DefineProp(this, PropName, PropDesc) {
+                ; MsgBox(Type(this))
+
+                if (IsPrivate(PropName) && !(this is Private)) {
+                    throw Error("Private property", -2)
+                }
+                ConvertInstanceProp(PropDesc, PropDesc)
+                return this
+            }
+        }
 
         /**
          * Converts regular static properties of the class into ones that
@@ -65,13 +156,13 @@ class Privatizer {
         ConvertStaticProp(PropertyName, PropDesc) {
             if (IsPrivate(PropertyName)) {
                 ; move private static to the subclass
-                Debug("    {1:-20} : {2}", "private", PropertyName)
+                Debug(DebugFormat, "private", PropertyName)
                 Delete(BaseClass, PropertyName)
                 Define(Subclass, PropertyName, PropDesc)
             } else {
                 ; decorate public static properties with impersonation as
                 ; subclass
-                Debug("    {1:-20} : {2}", "public", PropertyName)
+                Debug(DebugFormat, "public", PropertyName)
                 Define(BaseClass, PropertyName,
                         PublicStaticProp(PropDesc, BaseClass, Subclass))
             }
@@ -90,20 +181,20 @@ class Privatizer {
                 ; "temporary elevation" to the subclass, enabling full access
                 ; to properties
                 case (!IsPrivate(PropertyName)):
-                    Debug("    {1:-20} : {2}", "public", PropertyName)
+                    Debug(DebugFormat, "public", PropertyName)
                     Define(BaseProto, PropertyName,
                             PublicProp(PropDesc, BaseProto, SubProto))
 
                 ; validate private fields to ensure they've been accessed from
                 ; the elevated subclass
                 case (IsField(PropDesc)):
-                    Debug("    {1:-20} : {2}", "private field", PropertyName)
+                    Debug(DebugFormat, "private field", PropertyName)
                     Define(BaseProto, PropertyName,
                             PrivateField(PropDesc.Value, SubProto))
                 
                 ; move everything else into the subclass
                 default:
-                    Debug("    {1:-20} : {2}", "private property", PropertyName)
+                    Debug(DebugFormat, "private property", PropertyName)
                     Delete(BaseProto, PropertyName)
                     Define(SubProto, PropertyName, PropDesc)
             }
@@ -119,7 +210,9 @@ class Privatizer {
         static CreateSubclass(BaseClass, Name) {
             if (VerCompare(A_AhkVersion, "2.1-alpha.3") >= 0) {
                 ; TODO probably try to remove all custom `static __New()`'s
-                ; temporarily so you don't cause infinite recursion
+                ; temporarily, for the sake of creating subclasses
+                ; >=v2.1-alpha.3 without triggering `static __New()` and
+                ; cause infinite recursion. For now, this is fine.
                 Subclass := Class(BaseClass)
             } else {
                 Subclass := Class()
@@ -329,20 +422,18 @@ class Privatizer {
 
 
 class Foo {
-    a => "public"
-    _a => "private"
-
-    SetFoo(Value) {
-        this._foo := Value
+    static A() {
+        return this._B()
     }
-    GetFoo() {
-        return this._foo
+
+    static DefinePrivateB() {
+        this.DefineProp("_B", { Call: (*) => MsgBox("Hello, world!") })
     }
 }
 
 Privatizer.Transform(Foo)
 
-Obj := Foo()
-Obj.SetFoo(21)
-MsgBox(Obj.GetFoo())
-MsgBox(Obj._foo)
+Foo.DefinePrivateB()
+
+Foo.A()
+
