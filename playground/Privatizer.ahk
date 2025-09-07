@@ -1,6 +1,91 @@
 #Requires AutoHotkey v2.0
 
+/**
+ * This utility introduces simulated public and private fields into AutoHotkey
+ * classes. It works seamlessly, without changing how you normally
+ * interact with objects.
+ 
+ * ```ahk
+ * class Foo {
+ *     static _foo := 12            ; private
+ *     static GetFoo() => this._foo ; public
+ * }
+ * Privatizer.Transform(Foo)
+ * MsgBox(Foo.GetFoo())       ; 12
+ * MsgBox(Foo._foo)           ; Error! ... has no property named '_foo'.
+ * ```
+ * 
+ * Private properties start with exactly *one* underscore, e.g. `_foo`.
+ * These can only be accessed from inside the class itself.
+ * 
+ * ---
+ * 
+ * ### How it works (Behind The Scenes)
+ * 
+ * Private properties are simulated by restructuring the class at runtime.
+ * The trick is in separating public and private members, and then enforcing
+ * context-based access.
+ * 
+ * - Any member starting with exactly one underscore (`_`) is seen as private.
+ * - A new subclass is generated to accomodate all of the private properties.
+ * - Each private property is removed from the original class, so they cannot
+ *   be reached directly.
+ * 
+ * ```ahk
+ * ; <<<< before conversion >>>>
+ * ; user-defined
+ * class Example {
+ *     static Value   := "public"
+ *     static _secret := "private"
+ * 
+ *     static GetSecret() {
+ *         return this._secret
+ *     }
+ * }
+ * Privatizer.Transform(Example)
+ * 
+ * ; <<<< after converstion >>>>
+ * ; public-facing class
+ * class Example {
+ *     static Value := "public"
+ * 
+ *     static GetSecret() {
+ *         return Example_Private._secret
+ *     }
+ * }
+ * 
+ * ; invisible subclass
+ * class Example_Private extends Example {
+ *     static _secret := "private"
+ * }
+ * ```
+ * 
+ * @author 0w0Demonic
+ * Made with love and lots of caffeine.
+ */
 class Privatizer {
+    /**
+     * Static constructor that automatically converts a class if it derives
+     * from `Privatizer`.
+     * 
+     * @example
+     * class Foo extends Privatizer {
+     *     ; ...
+     * }
+     */
+    static __New() {
+        if (this != Privatizer) {
+            Privatizer.Transform(this)
+            ObjSetBase(this, Object)
+            ObjSetBase(this.Prototype, Object.Prototype)
+        }
+    }
+
+    /**
+     * Converts the given class to support public and private properties.
+     * 
+     * @param   {Class}  Target  the class to be converted
+     */
     static Transform(Target) {
         ; >>>>>>>>>>>>>>>
         ; 
@@ -36,7 +121,7 @@ class Privatizer {
         Debug("")
         Debug("modifying static properties ({1}):", BaseClassName)
         for PropertyName, PropDesc in FindProps(BaseClass, "__Set") {
-            ConvertStaticProp(PropertyName, PropDesc)
+            ConvertStaticProp(PropertyName, PropDesc, BaseClass, Subclass)
         }
         Debug("done.")
         Debug("")
@@ -120,7 +205,7 @@ class Privatizer {
                 if (IsPrivate(PropName) && (this != Private)) {
                     throw Error("Private property", -2)
                 }
-                ConvertStaticProp(PropName, PropDesc)
+                ConvertStaticProp(PropName, PropDesc, Public, Private)
                 return this
             }
         }
@@ -138,10 +223,13 @@ class Privatizer {
             DefineProp(this, PropName, PropDesc) {
                 ; MsgBox(Type(this))
 
+                if ((this != BaseProto) && (this != SubProto)) {
+                    throw Error("Not yet supported", -2)
+                }
                 if (IsPrivate(PropName) && !(this is Private)) {
                     throw Error("Private property", -2)
                 }
-                ConvertInstanceProp(PropDesc, PropDesc)
+                ConvertInstanceProp(PropName, PropDesc)
                 return this
             }
         }
@@ -152,19 +240,21 @@ class Privatizer {
          * 
          * @param   {String}  PropertyName  name of the property
          * @param   {Object}  PropDesc      property descriptor object
+         * @param   {Class}   Public        public class
+         * @param   {Class}   Private       internal subclass
          */
-        ConvertStaticProp(PropertyName, PropDesc) {
+        static ConvertStaticProp(PropertyName, PropDesc, Public, Private) {
             if (IsPrivate(PropertyName)) {
                 ; move private static to the subclass
                 Debug(DebugFormat, "private", PropertyName)
-                Delete(BaseClass, PropertyName)
-                Define(Subclass, PropertyName, PropDesc)
+                Delete(Public, PropertyName)
+                Define(Private, PropertyName, PropDesc)
             } else {
                 ; decorate public static properties with impersonation as
                 ; subclass
                 Debug(DebugFormat, "public", PropertyName)
-                Define(BaseClass, PropertyName,
-                        PublicStaticProp(PropDesc, BaseClass, Subclass))
+                Define(Public, PropertyName,
+                        PublicStaticProp(PropDesc, Public, Private))
             }
         }
 
@@ -208,12 +298,21 @@ class Privatizer {
          * @return  {Class}
          */
         static CreateSubclass(BaseClass, Name) {
+            static DoNothing := { Call: (*) => false }
+
             if (VerCompare(A_AhkVersion, "2.1-alpha.3") >= 0) {
-                ; TODO probably try to remove all custom `static __New()`'s
-                ; temporarily, for the sake of creating subclasses
-                ; >=v2.1-alpha.3 without triggering `static __New()` and
-                ; cause infinite recursion. For now, this is fine.
-                Subclass := Class(BaseClass)
+                ; prevent `static __New()` from being called when creating
+                ; a subclass through `Class()`
+                if (ObjHasOwnProp(BaseClass, "__New")) {
+                    __New := GetProp(BaseClass, "__New")
+                    Define(BaseClass, "__New", DoNothing)
+                    Subclass := Class(BaseClass)
+                    Define(BaseClass, "__New", __New)
+                } else {
+                    Define(BaseClass, "__New", DoNothing)
+                    Subclass := Class(BaseClass)
+                    Delete(BaseClass, "__New")
+                }
             } else {
                 Subclass := Class()
                 Subclass.Prototype := Object()
@@ -226,7 +325,7 @@ class Privatizer {
 
         /**
          * Iterates through properties of any given object, returning a map
-         * of property names mapped to their property descriptor
+         * of property names mapped to their property descriptor.
          * 
          * @param   {Object}   Target         any object
          * @param   {String*}  ExcludedProps  properties to be ignored
@@ -352,7 +451,7 @@ class Privatizer {
                     if (Instance != Private) {
                         throw Error("Private property")
                     }
-                    Define(Private, PropertyName, NewValue)
+                    Define(Private, PropertyName, { Value: NewValue })
                     return
                 }
             }
@@ -418,22 +517,3 @@ class Privatizer {
         static IsPrivate(PropertyName) => (PropertyName ~= "^_[^_]")
     }
 }
-
-
-
-class Foo {
-    static A() {
-        return this._B()
-    }
-
-    static DefinePrivateB() {
-        this.DefineProp("_B", { Call: (*) => MsgBox("Hello, world!") })
-    }
-}
-
-Privatizer.Transform(Foo)
-
-Foo.DefinePrivateB()
-
-Foo.A()
-
