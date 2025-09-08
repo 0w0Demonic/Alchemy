@@ -1,67 +1,108 @@
 #Requires AutoHotkey v2.0
 
 /**
- * This utility introduces simulated public and private fields into AutoHotkey
- * classes. It works seamlessly, without changing how you normally
- * interact with objects.
- 
+ * This utility introduces simulated public and private properties into
+ * AutoHotkey classes. It works seamlessly, without changing how you
+ * normally interact with objects.
+ * 
  * ```ahk
  * class Foo {
- *     static _foo := 12            ; private
- *     static GetFoo() => this._foo ; public
+ *     ; private field
+ *     static _value := "private"
+ * 
+ *     ; public method
+ *     static GetValue() => this._value
  * }
  * Privatizer.Transform(Foo)
- * MsgBox(Foo.GetFoo())       ; 12
- * MsgBox(Foo._foo)           ; Error! ... has no property named '_foo'.
+ * MsgBox(Foo.GetValue())     ; "private"
+ * MsgBox(Foo._value)         ; Error! ... has no property named `_value`.
  * ```
  * 
- * Private properties start with exactly *one* underscore, e.g. `_foo`.
- * These can only be accessed from inside the class itself.
+ * Private properties start with *exactly one underscore*, e.g. `_foo`.
+ * These can only be accessed from inside the class itself, i.e. when
+ * called from a property that is intrinsic to the class.
+ * 
+ * ---
+ * 
+ * You can convert your classes by either
+ * - extending `Privatizer`
+ * - calling `Privatizer.Transform(TargetClass)`
+ * 
+ * ```ahk
+ * ; option 1
+ * class Foo extends Privatizer {
+ * }
+ * 
+ * ; option 2
+ * class Bar {
+ * }
+ * Privatizer.Transform(Bar)
+ * ```
  * 
  * ---
  * 
  * ### How it works (Behind The Scenes)
  * 
- * Private properties are simulated by restructuring the class at runtime.
- * The trick is in separating public and private members, and then enforcing
- * context-based access.
+ * To support the use of private properties, this utility...
+ * - generates a new class that derives from the targeted class;
+ * - moves all private properties (i.e.: whose name start with exactly one
+ *   underscore) to the private class;
+ * - wraps public properties (i.e.: everything else) to temporarily "elevate"
+ *   to the subclass.
  * 
- * - Any member starting with exactly one underscore (`_`) is seen as private.
- * - A new subclass is generated to accomodate all of the private properties.
- * - Each private property is removed from the original class, so they cannot
- *   be reached directly.
+ * Where's an example of what you can imagine is done to the class
+ * after conversion:
  * 
  * ```ahk
- * ; <<<< before conversion >>>>
- * ; user-defined
- * class Example {
- *     static Value   := "public"
+ * ; before conversion
+ * 
+ * class Example extends Privatizer {
  *     static _secret := "private"
  * 
  *     static GetSecret() {
  *         return this._secret
  *     }
  * }
- * Privatizer.Transform(Example)
  * 
- * ; <<<< after converstion >>>>
- * ; public-facing class
+ * ; > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > 
+ * ; after conversion
+ * 
+ * ; "public class"
  * class Example {
- *     static Value := "public"
- * 
  *     static GetSecret() {
  *         return Example_Private._secret
  *     }
  * }
  * 
- * ; invisible subclass
- * class Example_Private extends Example {
+ * ; "private class", which is newly generated and inaccessible
+ * class Example_Private {
  *     static _secret := "private"
  * }
  * ```
  * 
+ * ---
+ * 
+ * ### Best Practices
+ * 
+ * Although a converted class ends up fairly bullet-proof, there's some
+ * things that might still cause it to break:
+ * 
+ * - *Don't override the base or the property of your class:*
+ * 
+ *   This utility requires the base class and the prototype to remain the same.
+ *   Changing them might cause properties to break.
+ * 
+ * - *Be cautious with `.DefineProp()`:*
+ * 
+ *   Privatized classes have their own `.DefineProp()` and `.__Set()`
+ *   properties so that they can handle new incoming properties appropriately.
+ *   You should always call the custom `.DefineProp()` method instead of using
+ *   e.g. `({}.DefineProp)(Obj, ...)` directly.
+ * 
+ *   In other words, *code like a normal human being*. Lol.
+ * 
  * @author 0w0Demonic
- * Made with love and lots of caffeine.
+ * Made with lots of love, caffeine, and alcohol.
  */
 class Privatizer {
     /**
@@ -75,9 +116,9 @@ class Privatizer {
      */
     static __New() {
         if (this != Privatizer) {
-            Privatizer.Transform(this)
             ObjSetBase(this, Object)
             ObjSetBase(this.Prototype, Object.Prototype)
+            Privatizer.Transform(this)
         }
     }
 
@@ -87,61 +128,73 @@ class Privatizer {
      * @param   {Class}  Target  the class to be converted
      */
     static Transform(Target) {
-        ; >>>>>>>>>>>>>>>
-        ; 
-        ; all descriptors for dynamic properties
-        static Descriptors := Array("Get", "Set", "Call")
-        ; 
-        ; Used with `Debug()`
-        static DebugFormat := ("    {1:-20} : {2}")
-        ; 
-        ; >>>>>>>>>>>>>>>
-        
         if (!(Target is Class)) {
             throw TypeError("Expected a Class",, Type(Target))
         }
+
         BaseClass     := Target
         BaseProto     := BaseClass.Prototype
         BaseClassName := BaseProto.__Class
         SubclassName  := BaseClassName . "(private)"
 
-        Debug("######## Privatizing class: '{1}' ########", BaseProto.__Class)
+        Debug("######## Privatizing class: '{1}' ########", BaseClassName)
         Debug("")
         Debug("creating subclass:")
-        Debug("    {1} extends {2} {{} ... {}}", SubclassName, BaseClassName)
-        Subclass  := CreateSubclass(BaseClass, SubclassName)
-        SubProto  := Subclass.Prototype
+        Debug("    class {1} extends {2} {", SubclassName, BaseClassName)
+        Debug("        ...")
+        Debug("    }")
+
+        Subclass := CreateSubclass(BaseClass, SubclassName)
+        SubProto := Subclass.Prototype
+
         Debug("done.")
         Debug("")
+
         Debug("defining '{1}.__Set()'", BaseClassName)
         Define(BaseClass, "__Set", StaticMetaSetter(BaseClass, Subclass))
+
         Debug("defining '{1}.Prototype.__Set()'", BaseClassName)
         Define(BaseProto, "__Set", MetaSetter(BaseClass, Subclass))
+
         Debug("done.")
         Debug("")
+
+        Public       := BaseClass
+        Private      := Subclass
+        PublicProto  := BaseClass.Prototype
+        PrivateProto := Subclass.Prototype
+
         Debug("modifying static properties ({1}):", BaseClassName)
-        for PropertyName, PropDesc in FindProps(BaseClass, "__Set") {
-            ConvertStaticProp(PropertyName, PropDesc, BaseClass, Subclass)
+        for PropName, PropDesc in FindProps(BaseClass, "__Set") {
+            PropDesc := ConvertStaticProp(PropName, PropDesc, Public, Private)
+            Define(Public, PropName, PropDesc)
         }
         Debug("done.")
         Debug("")
-        Debug("modifying instance properties ({1}.Prototype):", BaseClassName)
-        for PropertyName, PropDesc in FindProps(BaseProto, "__Set") {
-            ConvertInstanceProp(PropertyName, PropDesc)
+
+        Debug("modifying instance properties ({1}.Prototype)", BaseClassName)
+        for PropName, PropDesc in FindProps(BaseProto, "__Set") {
+            PropDesc := ConvertInstanceProp(PropName, PropDesc, Public, Private)
+            Define(PublicProto, PropName, PropDesc)
         }
         Debug("done.")
         Debug("")
+
         Debug("defining '{1}.DefineProp()'", BaseClassName)
         Define(BaseClass, "DefineProp",
                 CreateStaticDefineProp(BaseClass, Subclass))
+
         Debug("defining '{1}.Prototype.DefineProp()'", BaseClassName)
         Define(BaseProto, "DefineProp",
                 CreateDefineProp(BaseClass, Subclass))
+
         Debug("done.")
         Debug("----------------------------------------------")
         return
 
 ; >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+        ; >>>>>>>> MISC >>>>>>>>
 
         /**
          * `Object.Prototype.DefineProp()`.
@@ -151,8 +204,8 @@ class Privatizer {
          * @param   {Object}  PropDesc      property descriptor
          * @return  {Object}
          */
-        static Define(Obj, PropertyName, PropDesc) {
-            return (Object.Prototype.DefineProp)(Obj, PropertyName, PropDesc)
+        static Define(Obj, PropName, PropDesc) {
+            return (Object.Prototype.DefineProp)(Obj, PropName, PropDesc)
         }
 
         /**
@@ -162,8 +215,8 @@ class Privatizer {
          * @param   {String}  PropertyName  name of the property
          * @return  {Object}
          */
-        static Delete(Obj, PropertyName) {
-            return (Object.Prototype.DeleteProp)(Obj, PropertyName)
+        static Delete(Obj, PropName) {
+            return (Object.Prototype.DeleteProp)(Obj, PropName)
         }
 
         /**
@@ -173,8 +226,8 @@ class Privatizer {
          * @param   {String}  PropertyName  name of the property
          * @return  {Object}
          */
-        static GetProp(Obj, PropertyName) {
-            return (Object.Prototype.GetOwnPropDesc)(Obj, PropertyName)
+        static GetProp(Obj, PropName) {
+            return (Object.Prototype.GetOwnPropDesc)(Obj, PropName)
         }
 
         /**
@@ -184,121 +237,39 @@ class Privatizer {
          * @param   {Any*}    Args          zero or more arguments
          */
         static Debug(FormatString, Args*) {
-            OutputDebug(Format("[DEBUG] " . FormatString . "`r`n", Args*))
-            ; FileAppend(Format("[DEBUG] " . FormatString . "`r`n", Args*),
-            ;            "Privatizer_debug.txt")
+            static Output := (
+                ; OutputDebug                                   ; to debugger
+                ObjBindMethod(FileAppend,, unset, "debug.log")  ; to file
+            )
+
+            Str := Format("[DEBUG] " . FormatString . "`r`n", Args*)
+            Output(Str)
         }
 
         /**
-         * Creates a custom `static DefineProp()` with additional validation.
+         * Debug output related to conversion of properties.
          * 
-         * @param   {Class}  Public   base class
-         * @param   {Class}  Private  hidden subclass
-         * @return  {Object}
+         * @param   {String}  Description  description of the new property
+         * @param   {String}  PropName     name of the property
          */
-        CreateStaticDefineProp(Public, Private) {
-            return { Call: StaticDefineProp }
-
-            StaticDefineProp(this, PropName, PropDesc) {
-                ; MsgBox(this.Prototype.__Class)
-
-                if (IsPrivate(PropName) && (this != Private)) {
-                    throw Error("Private property", -2)
-                }
-                ConvertStaticProp(PropName, PropDesc, Public, Private)
-                return this
-            }
+        static DebugProp(Description, PropName) {
+            Debug("    {1:-20} : {2}", Description, PropName)
         }
 
-        /**
-         * Creates a custom `static DefineProp()` with additional validation.
-         * 
-         * @param   {Class}  Public   base class
-         * @param   {Class}  Private  hidden subclass
-         * @return  {Object}
-         */
-        CreateDefineProp(Public, Private) {
-            return { Call: DefineProp }
-
-            DefineProp(this, PropName, PropDesc) {
-                ; MsgBox(Type(this))
-
-                if ((this != BaseProto) && (this != SubProto)) {
-                    throw Error("Not yet supported", -2)
-                }
-                if (IsPrivate(PropName) && !(this is Private)) {
-                    throw Error("Private property", -2)
-                }
-                ConvertInstanceProp(PropName, PropDesc)
-                return this
-            }
-        }
+        ; >>>>>>>> SUBCLASS GENERATION >>>>>>>>
 
         /**
-         * Converts regular static properties of the class into ones that
-         * support the use of private fields.
+         * Generates a new subclass that derives from the given base class.
          * 
-         * @param   {String}  PropertyName  name of the property
-         * @param   {Object}  PropDesc      property descriptor object
-         * @param   {Class}   Public        public class
-         * @param   {Class}   Private       internal subclass
+         * @param   {Class?}   BaseClass  subclass to derive from
+         * @param   {String?}  Name       name of the class (`__Class`)
          */
-        static ConvertStaticProp(PropertyName, PropDesc, Public, Private) {
-            if (IsPrivate(PropertyName)) {
-                ; move private static to the subclass
-                Debug(DebugFormat, "private", PropertyName)
-                Delete(Public, PropertyName)
-                Define(Private, PropertyName, PropDesc)
-            } else {
-                ; decorate public static properties with impersonation as
-                ; subclass
-                Debug(DebugFormat, "public", PropertyName)
-                Define(Public, PropertyName,
-                        PublicStaticProp(PropDesc, Public, Private))
-            }
-        }
-
-        /**
-         * Converts regular instance properties of the class into ones that
-         * support the use of private fields.
-         * 
-         * @param   {String}  PropertyName  name of the property
-         * @param   {Object}  PropDesc      property descriptor object
-         */
-        ConvertInstanceProp(PropertyName, PropDesc) {
-            switch {
-                ; decorate public instance properties with
-                ; "temporary elevation" to the subclass, enabling full access
-                ; to properties
-                case (!IsPrivate(PropertyName)):
-                    Debug(DebugFormat, "public", PropertyName)
-                    Define(BaseProto, PropertyName,
-                            PublicProp(PropDesc, BaseProto, SubProto))
-
-                ; validate private fields to ensure they've been accessed from
-                ; the elevated subclass
-                case (IsField(PropDesc)):
-                    Debug(DebugFormat, "private field", PropertyName)
-                    Define(BaseProto, PropertyName,
-                            PrivateField(PropDesc.Value, SubProto))
-                
-                ; move everything else into the subclass
-                default:
-                    Debug(DebugFormat, "private property", PropertyName)
-                    Delete(BaseProto, PropertyName)
-                    Define(SubProto, PropertyName, PropDesc)
-            }
-        }
-
-        /**
-         * Creates a subclass of the given `BaseClass`
-         * 
-         * @param   {Class}   BaseClass  base class to be derived from
-         * @param   {String}  Name       name of the class
-         * @return  {Class}
-         */
-        static CreateSubclass(BaseClass, Name) {
+        static CreateSubclass(BaseClass := Object, Name := "") {
             static DoNothing := { Call: (*) => false }
+
+            if (!(BaseClass is Class)) {
+                throw TypeError("Expected a Class",, Type(BaseClass))
+            }
 
             if (VerCompare(A_AhkVersion, "2.1-alpha.3") >= 0) {
                 ; prevent `static __New()` from being called when creating
@@ -323,20 +294,21 @@ class Privatizer {
             return Subclass
         }
 
+        ; >>>>>>>> CONVERSION >>>>>>>>
+
         /**
-         * Iterates through properties of any given object, returning a map
+         * Enumerates all properties of the given object, returning a map
          * of property names mapped to their property descriptor.
          * 
-         * @param   {Object}   Target         any object
-         * @param   {String*}  ExcludedProps  properties to be ignored
+         * @param   {Object}   Target        any object
+         * @param   {String*}  ExcludedProp  properties to be ignored
          * @return  {Map}
          */
         static FindProps(Target, ExcludedProps*) {
-            static GetProp := (Object.Prototype.GetOwnPropDesc)
             M := Map()
             M.CaseSense := false
-            for PropertyName in ObjOwnProps(Target) {
-                M.Set(PropertyName, GetProp(Target, PropertyName))
+            for PropName in ObjOwnProps(Target) {
+                M.Set(PropName, GetProp(Target, PropName))
             }
             for ExcludedProp in ExcludedProps {
                 if (M.Has(ExcludedProp)) {
@@ -347,23 +319,108 @@ class Privatizer {
         }
 
         /**
-         * Determines whether the given property descriptor defines a regular
-         * field.
+         * Converts a static property of the user-defined class.
          * 
-         * @param  {Object}  PropDesc  the property descriptor to be checked
+         * @param   {String}  PropName  name of the property
+         * @param   {Object}  PropDesc  the property descriptor
+         * @param   {Class}   Public    public class
+         * @param   {Class}   Private   private class
+         * @return  {Object}
+         */
+        static ConvertStaticProp(PropName, PropDesc, Public, Private) {
+            switch {
+                case (IsPrivate(PropName) && IsField(PropDesc)):
+                    Convert     := PrivateField
+                    Description := "private field"
+                case (IsPrivate(PropName)):
+                    Convert     := PrivateStaticProp
+                    Description := "private"
+                default:
+                    Convert     := PublicStaticProp
+                    Description := "public"
+            }
+            DebugProp(Description, PropName)
+            return Convert(PropName, PropDesc, Public, Private)
+        }
+
+        /**
+         * Converts an instance property of the user-defined class.
+         * 
+         * @param   {String}  PropName  name of the property
+         * @param   {Object}  PropDesc  the property descriptor
+         * @param   {Class}   Public    public class
+         * @param   {Class}   Private   private class
+         * @return  {Object}
+         */
+        static ConvertInstanceProp(PropName, PropDesc, Public, Private) {
+            switch {
+                case (!IsPrivate(PropName)):
+                    Convert     := PublicProp
+                    Description := "public property"
+                case (IsField(PropDesc)):
+                    Convert     := PrivateField
+                    Description := "private field"
+                default:
+                    Convert     := PrivateProp
+                    Description := "private field"
+            }
+            DebugProp(Description, PropName)
+            return Convert(PropName, PropDesc, Public, Private)
+        }
+
+        ; >>>>>>>> PROPERTIES >>>>>>>>
+
+        /**
+         * Determines whether the property name is public or private.
+         * 
+         * @param   {String}  PropName  name of the property
+         * @return  {Boolean}
+         */
+        static IsPrivate(PropName) => (PropName ~= "^_[^_]")
+
+        /**
+         * Determines whether the property descriptor is a regular field with
+         * `Value` property.
+         * 
+         * @param   {Object}  PropDesc  the property descriptor
+         * @return  {Boolean}
          */
         static IsField(PropDesc) => ObjHasOwnProp(PropDesc, "Value")
 
         /**
-         * Decorates a property descriptor with impersonation as the hidden
-         * subclass
+         * Helper function that wraps a property descriptor by applying the
+         * given `Decorator` function.
          * 
-         * @param   {Object}  PropDesc  property descriptor to be wrapped around
-         * @param   {Class}   Public    public class
-         * @param   {Class}   Private   internal subclass
+         * @param   {Object}  PropDesc   the property descriptor
+         * @param   {Func}    Decorator  decorator function
          * @return  {Object}
          */
-        static PublicStaticProp(PropDesc, Public, Private) {
+        static DecorateProp(PropDesc, Decorator) {
+            if (IsField(PropDesc)) {
+                return PropDesc
+            }
+            Result := Object()
+            for Descriptor in Array("Get", "Set", "Call") {
+                if (ObjHasOwnProp(PropDesc, Descriptor)) {
+                    Decorated := Decorator(GetProp(PropDesc, Descriptor).Value)
+                    Define(Result, Descriptor, { Value: Decorated })
+                }
+            }
+            return Result
+        }
+        
+        /**
+         * Represents a public static property. Conceptually speaking, each
+         * public static property "impersonates" as the subclass to gain access
+         * to hidden private properties.
+         * 
+         * @param   {String}  PropName  name of the property
+         * @param   {Object}  PropDesc  the property descriptor
+         * @param   {Class}   Public    public class
+         * @param   {Class}   Private   private class
+         * @return  {Object}
+         */
+        static PublicStaticProp(PropName, PropDesc, Public, Private) {
             return DecorateProp(PropDesc, Impersonation)
 
             Impersonation(Callback) {
@@ -376,29 +433,56 @@ class Privatizer {
         }
 
         /**
-         * Decorates a property descriptor with "temporary elevation" in which
-         * the calling object's base is being set to the subclass for granting
-         * access to private properties.
+         * Represents a private static property. Additional type checking is
+         * done to ensure the property was called with elevated rights.
          * 
-         * @param   {Object}  PropDesc  property descriptor to be wrapped around
-         * @param   {Object}  Public    public class prototype
-         * @param   {Object}  Private   internal subclass prototype
+         * @param   {String}  PropName  name of the property
+         * @param   {Object}  PropDesc  the property descriptor
+         * @param   {Class}   Public    public class
+         * @param   {Class}   Private   private class
          * @return  {Object}
          */
-        static PublicProp(PropDesc, Public, Private) {
+        static PrivateStaticProp(PropName, PropDesc, Public, Private) {
+            return DecorateProp(PropDesc, TypeChecking)
+
+            TypeChecking(Callback) {
+                return TypeChecked
+
+                TypeChecked(this, Args*) {
+                    if (this != Private) {
+                        throw TypeError("private property", -2, PropName)
+                    }
+                    return Callback(this, Args*)
+                }
+            }
+        }
+
+        /**
+         * Represents a public instance property. The property temporarily
+         * "elevates" itself to the subclass to gain access to internal
+         * properties.
+         * 
+         * @param   {String}  PropName  name of the property
+         * @param   {Object}  PropDesc  the property descriptor
+         * @param   {Class}   Public    public class
+         * @param   {Class}   Private   private class
+         * @return  {Object}
+         */
+        static PublicProp(PropName, PropDesc, Public, Private) {
             return DecorateProp(PropDesc, Elevation)
 
             Elevation(Callback) {
                 return Elevated
 
-                Elevated(Instance, Args*) {
-                    ObjSetBase(Instance, Private)
+                Elevated(this, Args*) {
+                    Prev := ObjGetBase(this)
+                    ObjSetBase(this, Private.Prototype)
                     try {
-                        Result := Callback(Instance, Args*)
-                        ObjSetBase(Instance, Public)
+                        Result := Callback(this, Args*)
+                        ObjSetBase(this, Prev)
                         return Result
                     } catch as Ex {
-                        ObjSetBase(Instance, Public)
+                        ObjSetBase(this, Prev)
                         throw Ex
                     }
                 }
@@ -406,114 +490,159 @@ class Privatizer {
         }
 
         /**
-         * Decorates a property descriptor by applying the specified
-         * `Decorator`. Regular fields (i.e. with `Value`) are left unchanged.
+         * Represents a private instance property. Additional type checking is
+         * done to ensure the property was called with elevated rights.
          * 
-         * @param   {Object}  PropDesc   property descriptor to wrap around
-         * @param   {Func}    Decorator  decorator to be used
+         * @param   {String}  PropName  name of the property
+         * @param   {Object}  PropDesc  the property descriptor
+         * @param   {Class}   Public    public class
+         * @param   {Class}   Private   private class
          * @return  {Object}
          */
-        static DecorateProp(PropDesc, Decorator) {
-            if (IsField(PropDesc)) {
-                return PropDesc
-            }
-            Result := Object()
-            for Descriptor in Descriptors {
-                if (ObjHasOwnProp(PropDesc, Descriptor)) {
-                    ; absolute paranoia
-                    Define(Result, Descriptor, {
-                        Value: Decorator(GetProp(PropDesc, Descriptor).Value)
-                    })
-                }
-            }
-            return Result
-        }
+        static PrivateProp(PropName, PropDesc, Public, Private) {
+            return DecorateProp(PropDesc, TypeChecking)
 
-        /**
-         * Defines the `static __Set()` meta-property for privatized classes.
-         * 
-         * @param   {Class}  Public   base class
-         * @param   {Class}  Private  hidden subclass
-         * @return  {Object}
-         */
-        static StaticMetaSetter(Public, Private) {
-            return { Call: static__Set }
+            TypeChecking(Callback) {
+                return TypeChecked
 
-            static__Set(Instance, PropertyName, Params, NewValue) {
-                ; public properties are set from the base class directly
-                if (!IsPrivate(PropertyName)) {
-                    Define(Public, PropertyName, NewValue)
-                    return
-                }
-                ; if the new property is private, validate that this method is
-                ; called from the subclass, otherwise throw
-                if (IsPrivate(PropertyName)) {
-                    if (Instance != Private) {
-                        throw Error("Private property")
+                TypeChecked(this, Args*) {
+                    if (!(this is Private)) {
+                        throw TypeError("private property", -2, PropName)
                     }
-                    Define(Private, PropertyName, { Value: NewValue })
-                    return
+                    return Callback(this, Args*)
                 }
             }
         }
 
         /**
-         * Defines the `__Set()` meta-property for privatized classes.
+         * Represents a regular field, but with additional type checking.
          * 
-         * @param   {Class}  Public   base class
-         * @param   {Class}  Private  hidden subclass
+         * @param   {String}  PropName  name of the property
+         * @param   {Object}  PropDesc  the property descriptor
+         * @param   {Class}   Public    public class
+         * @param   {Class}   Private   private class
          * @return  {Object}
          */
-        static MetaSetter(Public, Private) {
-            return { Call: __Set }
-
-            __Set(Instance, PropertyName, Params, NewValue) {
-                ; set public properties like normal
-                if (!IsPrivate(PropertyName)) {
-                    Define(Instance, PropertyName, NewValue)
-                    return
-                }
-                ; validate if this private property has been set from inside the
-                ; class, otherwise throw
-                if (!(Instance is Private)) {
-                    throw Error("Private property", -2)
-                }
-                ; define a property with type validation for the subclass
-                Define(Instance, PropertyName, PrivateField(NewValue, Private))
-            }
-        }
-
-        /**
-         * Creates a property that simulates a regular field, but with
-         * additional type checking to validate access to the field.
-         * 
-         * @param   {Any}    Value    value of the field
-         * @param   {Class}  Private  hidden subclass
-         * @return  {Object}
-         */
-        static PrivateField(Value, Private) {
+        static PrivateField(PropName, PropDesc, Public, Private) {
+            Value := PropDesc.Value
             return { Get: Getter, Set: Setter }
 
             Getter(Instance) {
                 if (!(Instance is Private)) {
-                    throw TypeError("Private property", -2)
+                    throw TypeError("Private property", -2, PropName)
                 }
                 return Value
             }
             Setter(Instance, NewValue) {
                 if (!(Instance is Private)) {
-                    throw TypeError("Private property", -2)
+                    throw TypeError("Private property", -2, PropName)
                 }
                 return (Value := NewValue)
             }
         }
 
+        ; >>>>>>>> DEFINEPROP >>>>>>>>
+
         /**
-         * Determines whether a property is public or private.
+         * Defines the `static DefineProp()` property to be used by the class.
          * 
-         * @param   {String}  PropertyName  name of the property
-         * @return  {Boolean}
+         * @param   {Class}  Public   public class
+         * @param   {Class}  Private  private class
+         * @return  {Object}
          */
-        static IsPrivate(PropertyName) => (PropertyName ~= "^_[^_]")
+        static CreateStaticDefineProp(Public, Private) {
+            return { Call: StaticDefineProp }
+
+            StaticDefineProp(this, PropName, PropDesc) {
+                ; MsgBox(this.Prototype.__Class)
+                if (IsPrivate(PropName) && (this != Private)) {
+                    throw Error("Private property", -2)
+                }
+                PropDesc := ConvertStaticProp(
+                        PropName, PropDesc, Public, Private)
+                return Define(this, PropName, PropDesc)
+            }
+        }
+
+        /**
+         * Defines the `DefineProp()` property to be used by the class.
+         * 
+         * @param   {Class}  Public   public class
+         * @param   {Class}  Private  private class
+         * @return  {Object}
+         */
+        static CreateDefineProp(Public, Private) {
+            return { Call: DefineProp }
+
+            DefineProp(this, PropName, PropDesc) {
+                ; MsgBox(Type(this))
+                if (IsPrivate(PropName) && !(this is Private)) {
+                    throw Error("Private property", -2)
+                }
+                PropDesc := ConvertInstanceProp(
+                        PropName, PropDesc,
+                        this, Private)
+
+                return Define(this, PropName, PropDesc)
+            }
+        }
+
+        ; >>>>>>>> __SET >>>>>>>>
+
+        /**
+         * Defines the `static DefineProp()` property to be used by the class.
+         * 
+         * @param   {Class}  Public   public class
+         * @param   {Class}  Private  private class
+         * @return  {Object}
+         */
+        static StaticMetaSetter(Public, Private) {
+            return { Call: static__Set }
+
+            static__Set(Instance, PropName, Params, NewValue) {
+                ; public properties are set from the base class directly
+                if (!IsPrivate(PropName)) {
+                    Define(Public, PropName, NewValue)
+                    return
+                }
+                ; if the new property is private, validate that this method is
+                ; called from the subclass, otherwise throw
+                if (IsPrivate(PropName)) {
+                    if (Instance != Private) {
+                        throw Error("Private property")
+                    }
+                    Define(Private, PropName, { Value: NewValue })
+                    return
+                }
+            }
+        }
+
+        /**
+         * Defines the `DefineProp()` property to be used by the class.
+         * 
+         * @param   {Class}  Public   public class
+         * @param   {Class}  Private  private class
+         * @return  {Object}
+         */
+        static MetaSetter(Public, Private) {
+            return { Call: __Set }
+
+            __Set(this, PropName, Params, NewValue) {
+                ; set public properties like normal
+                if (!IsPrivate(PropName)) {
+                    Define(this, PropName, NewValue)
+                    return
+                }
+                ; validate if this private property has been set from inside the
+                ; class, otherwise throw
+                if (!(this is Private)) {
+                    throw Error("Private property", -2)
+                }
+                ; define a property with type validation for the subclass
+                Field := { Value: NewValue }
+                PropDesc := PrivateField(PropName, Field, Public, Private)
+                Define(this, PropName, PropDesc)
+            }
+        }
     }
 }
