@@ -36,6 +36,7 @@
  * ; option 2
  * class Bar {
  * }
+ * 
  * Privatizer.Transform(Bar)
  * ```
  * 
@@ -45,8 +46,7 @@
  * 
  * To support the use of private properties, this utility...
  * - generates a new class that derives from the targeted class;
- * - moves all private properties (i.e.: whose name start with exactly one
- *   underscore) to the private class;
+ * - moves all private properties
  * - wraps public properties (i.e.: everything else) to temporarily "elevate"
  *   to the subclass.
  * 
@@ -194,7 +194,9 @@ class Privatizer {
 
 ; >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
+        ; >>
         ; >>>>>>>> MISC >>>>>>>>
+        ; >>
 
         /**
          * `Object.Prototype.DefineProp()`.
@@ -238,8 +240,9 @@ class Privatizer {
          */
         static Debug(FormatString, Args*) {
             static Output := (
-                ; OutputDebug                                   ; to debugger
-                ObjBindMethod(FileAppend,, unset, "debug.log")  ; to file
+                OutputDebug                                     ; to debugger
+;               ObjBindMethod(FileAppend,, unset, "debug.log")  ; to file
+;               (*) => false                                    ; do nothing
             )
 
             Str := Format("[DEBUG] " . FormatString . "`r`n", Args*)
@@ -256,7 +259,9 @@ class Privatizer {
             Debug("    {1:-20} : {2}", Description, PropName)
         }
 
+        ; >>
         ; >>>>>>>> SUBCLASS GENERATION >>>>>>>>
+        ; >>
 
         /**
          * Generates a new subclass that derives from the given base class.
@@ -294,7 +299,9 @@ class Privatizer {
             return Subclass
         }
 
+        ; >>
         ; >>>>>>>> CONVERSION >>>>>>>>
+        ; >>
 
         /**
          * Enumerates all properties of the given object, returning a map
@@ -368,7 +375,9 @@ class Privatizer {
             return Convert(PropName, PropDesc, Public, Private)
         }
 
+        ; >>
         ; >>>>>>>> PROPERTIES >>>>>>>>
+        ; >>
 
         /**
          * Determines whether the property name is public or private.
@@ -541,7 +550,9 @@ class Privatizer {
             }
         }
 
+        ; >>
         ; >>>>>>>> DEFINEPROP >>>>>>>>
+        ; >>
 
         /**
          * Defines the `static DefineProp()` property to be used by the class.
@@ -587,7 +598,9 @@ class Privatizer {
             }
         }
 
+        ; >>
         ; >>>>>>>> __SET >>>>>>>>
+        ; >>
 
         /**
          * Defines the `static DefineProp()` property to be used by the class.
